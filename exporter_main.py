@@ -9,7 +9,7 @@ from prometheus_client import Gauge
 from prometheus_client import start_http_server
 
 def load_config():
-    with open("TRack_exporter_config.yaml", "r") as file:
+    with open("exporter_config.yaml", "r") as file:
         config = yaml.safe_load(file)
     return config
 
