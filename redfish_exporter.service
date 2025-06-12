@@ -1,0 +1,17 @@
+[Unit]
+Description=T-Rack Redfish Exporter for Prometheus
+After=network.target
+
+[Service]
+ExecStart=/home/ding/prome/pro_env/bin/python3 /home/ding/prome/server_exporter.py
+WorkingDirectory=/home/ding
+Restart=always
+User=ding
+Environment=PYTHONUNBUFFERED=1
+
+# log setting
+StandardOutput=append:/home/ding/prome/log/redfish_exporter.log
+StandardError=append:/home/ding/prome/log/redfish_exporter.err
+
+[Install]
+WantedBy=multi-user.target
