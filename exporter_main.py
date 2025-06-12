@@ -136,56 +136,32 @@ def fetch_psu_data():
         except Exception as e:
             print(f"[ERROR] {psu['name']} psu data get fail：{e}")
 def fetch_cdu_data():
-    notation_map_t = ["T_WI", "T_WO", "T_CS", "T_CR", "T_CCI", "T_CCO", "T_AI1", "T_AI2", "T_AI3", "T_AI4", "T_AI5", "T_AO1", "T_AO2", "T_AO3", "T_AO4", "T_AO5", "T_MCU"]
-    notation_map_p = ["RPM_P1", "RPM_P2", "RPM_P3", "POW_P1", "POW_P2", "POW_P3"]
-    notation_map_f = ["RPM_F1", "RPM_F2", "RPM_F3", "RPM_F4", "RPM_F5", "POW_F1", "POW_F2", "POW_F3", "POW_F4", "POW_F5"]
-    notation_map_s = ["Seonsor_L1", "Sensor_L2", "Sensor_RL1", "Sensor_RL2", "Sensor_LEVH", "Sensor_LEVM", "Sensor_LEVL"]
+    """Query CDU metrics and expose them via Prometheus gauges."""
 
     try:
         response = requests.get(cdu_url, timeout=10)
         response.raise_for_status()
         src_data = response.json()
 
-        ListTemp = src_data['responses'][0]['T']
-        ListPump = src_data['responses'][1]['P']
-        ListFan = src_data['responses'][2]['F']
-        ListSensor = src_data['responses'][3]['S']
+        for entry in src_data.get("responses", []):
+            if not isinstance(entry, dict):
+                continue
 
-        for i, label in enumerate(notation_map_t):
-            if i < len(ListTemp):
-                val = ListTemp[i]
-                if isinstance(val, (int, float)):
+            for label, val in entry.items():
+                if not isinstance(val, (int, float)):
+                    print(f"[SKIP] CDU {label} invalid value")
+                    continue
+
+                if label.startswith("T_") or label == "Ta":
                     cdu_temperature.labels(metric=label).set(val)
-                    print(f"[OK] CDU Temp {label} = {val}")
-                else:
-                    print(f"[SKIP] CDU Temp {label} No value")
-
-        for i, label in enumerate(notation_map_p):
-            if i < len(ListPump):
-                val = ListPump[i]
-                if isinstance(val, (int, float)):
+                elif label.startswith("RPM_P") or label.startswith("POW_P") or label.startswith("PWM_P"):
                     cdu_pump.labels(metric=label).set(val)
-                    print(f"[OK] CDU Pump {label} = {val}")
-                else:
-                    print(f"[SKIP] CDU Pump {label} Invalid value")
-
-        for i, label in enumerate(notation_map_f):
-            if i < len(ListFan):
-                val = ListFan[i]
-                if isinstance(val, (int, float)):
+                elif label.startswith("RPM_F") or label.startswith("POW_F") or label.startswith("PWM_F"):
                     cdu_fan.labels(metric=label).set(val)
-                    print(f"[OK] CDU Fan {label} = {val}")
                 else:
-                    print(f"[SKIP] CDU Fan {label} Invalid value")
-
-        for i, label in enumerate(notation_map_s):
-            if i < len(ListSensor):
-                val = ListSensor[i]
-                if isinstance(val, (int, float)):
                     cdu_sensor.labels(metric=label).set(val)
-                    print(f"[OK] CDU Sensor {label} = {val}")
-                else:
-                    print(f"[SKIP] CDU Sensor {label} Invalid value")
+
+                print(f"[OK] CDU {label} = {val}")
 
     except Exception as e:
         print(f"[ERROR] CDU get data fail {e}")
