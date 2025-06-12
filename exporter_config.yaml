@@ -67,4 +67,4 @@ psus:
   - name: 'Powershelf_1'
     apiUrl: 'https://192.168.2.50/redfish/v1/Chassis/chassis/Sensors/chassis_output_power'
 
-cdu_url: "http://192.168.2.201:1880/get"
+cdu_url: "http://192.168.2.201:1880/getall"
