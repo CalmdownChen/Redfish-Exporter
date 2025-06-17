@@ -9,7 +9,15 @@ from prometheus_client import Gauge
 from prometheus_client import start_http_server
 
 def load_config():
-    with open("exporter_config.yaml", "r") as file:
+    """Load exporter configuration from a YAML file.
+
+    The configuration file is expected to reside in the same directory as this
+    script. Using an absolute path ensures the file can be located when the
+    script is executed via systemd or from another working directory.
+    """
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    config_path = os.path.join(script_dir, "exporter_config.yaml")
+    with open(config_path, "r") as file:
         config = yaml.safe_load(file)
     return config
 
