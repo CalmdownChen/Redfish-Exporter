@@ -41,6 +41,9 @@ sensors_dict = { # default None_A, if API call fail.
 sensor_temperature = Gauge("server_sensor_temperature_celsius", "Temperature from various sensors", ["server", "sensor_name"])
 server_power = Gauge("server_power_watt", "Total power reading", ["server"])
 server_fan_power = Gauge("server_fan_power_watt", "Total fan power reading", ["server"])
+server_cpu_power = Gauge("server_cpu_power_watt", "Total CPU power reading", ["server"])
+server_gpu_power = Gauge("server_gpu_power_watt", "Total GPU power reading", ["server"])
+server_mem_power = Gauge("server_mem_power_watt", "Total memory power reading", ["server"])
 psu_power_output = Gauge("psu_output_power_watt", "Output power reading from PSU", ["psu_name"])
 cdu_temperature = Gauge("cdu_temperature_celsius", "Temperature metrics from CDU", ["metric"])
 cdu_pump = Gauge("cdu_pump_metric", "Pump metrics from CDU", ["metric"])
@@ -83,49 +86,41 @@ def fetch_server_data():
         except Exception as e:
             print(f"[ERROR] {ip} Thermal API error: {e}")
 
-        # Server Node Power
-        try:
-            if "ASUS" in server['name']:
-                server_power.labels(server=ip).set(0)
-                continue
-            r = requests.get(f"{base_url}/Chassis/Self/Sensors/Pwr_Node_Total",
-                             headers={"Accept": "application/json"},
-                             auth=auth, verify=False, timeout=15)
-            r.raise_for_status()
-            data = r.json()
+        # Server power metrics
+        power_metrics = {
+            "Pwr_Node_Total": server_power,
+            "Pwr_Fan_Total": server_fan_power,
+            "Pwr_CPU_Total": server_cpu_power,
+            "Pwr_GPU_Total": server_gpu_power,
+            "Pwr_Mem_Total": server_mem_power,
+        }
 
-            power = data.get("Reading")
-            if isinstance(power, (int, float)):
-                server_power.labels(server=ip).set(power)
-                print(f"[OK] {ip} Node Power = {power}W")
-            else:
-                server_power.labels(server=ip).set(0)
-                print(f"[SKIP] {ip} Node Power invalid value")
+        if "ASUS" in server['name']:
+            for gauge in power_metrics.values():
+                gauge.labels(server=ip).set(0)
+            continue
 
-        except Exception as e:
-            print(f"[ERROR] {ip} Node Power API error: {e}")
+        for sensor, gauge in power_metrics.items():
+            try:
+                r = requests.get(
+                    f"{base_url}/Chassis/Self/Sensors/{sensor}",
+                    headers={"Accept": "application/json"},
+                    auth=auth,
+                    verify=False,
+                    timeout=15,
+                )
+                r.raise_for_status()
+                data = r.json()
 
-        # Server Fan Power
-        try:
-            if "ASUS" in server['name']:
-                server_fan_power.labels(server=ip).set(0)
-                continue
-            r = requests.get(f"{base_url}/Chassis/Self/Sensors/Pwr_Fan_Total",
-                             headers={"Accept": "application/json"},
-                             auth=auth, verify=False, timeout=15)
-            r.raise_for_status()
-            data = r.json()
-
-            power = data.get("Reading")
-            if isinstance(power, (int, float)):
-                server_fan_power.labels(server=ip).set(power)
-                print(f"[OK] {ip} Fan Power = {power}W")
-            else:
-                server_fan_power.labels(server=ip).set(0)
-                print(f"[SKIP] {ip} Fan Power invalid value")
-
-        except Exception as e:
-            print(f"[ERROR] {ip} Fan Power API error: {e}")
+                power = data.get("Reading")
+                if isinstance(power, (int, float)):
+                    gauge.labels(server=ip).set(power)
+                    print(f"[OK] {ip} {sensor} = {power}W")
+                else:
+                    gauge.labels(server=ip).set(0)
+                    print(f"[SKIP] {ip} {sensor} invalid value")
+            except Exception as e:
+                print(f"[ERROR] {ip} {sensor} API error: {e}")
 
 
 
