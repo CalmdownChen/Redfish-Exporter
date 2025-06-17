@@ -194,12 +194,12 @@ def fetch_cdu_data():
 
         # Calculate additional metrics if all required values are available
         if all(v is not None for v in (t_wi, t_wo)) and total_psu_power:
-            lpm_w = (total_psu_power / 0.97) / 69.7833 * (t_wo - t_wi)
+            lpm_w = (total_psu_power / 0.97) / 69.7833 / (t_wo - t_wi)
             cdu_calculated.labels(metric="LPM_W").set(lpm_w)
             print(f"[OK] CDU LPM_W = {lpm_w}")
 
         if all(v is not None for v in (t_cr, t_cco)) and total_psu_power:
-            lpm_c = total_psu_power / 69.7833 * (t_cr - t_cco)
+            lpm_c = total_psu_power / 69.7833 / (t_cr - t_cco)
             cdu_calculated.labels(metric="LPM_C").set(lpm_c)
             print(f"[OK] CDU LPM_C = {lpm_c}")
         else:
