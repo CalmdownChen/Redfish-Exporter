@@ -39,6 +39,12 @@ cdu_pump = Gauge("cdu_pump_metric", "Pump metrics from CDU", ["metric"])
 cdu_fan = Gauge("cdu_fan_metric", "Fan metrics from CDU", ["metric"])
 cdu_sensor = Gauge("cdu_sensor_metric", "Sensor metrics from CDU", ["metric"])
 
+# Calculated CDU metrics
+cdu_calculated = Gauge("cdu_calculated_metric", "Calculated metrics from CDU", ["metric"])
+
+# Global variable for total PSU power
+total_psu_power = 0.0
+
 def fetch_server_data():
     for server in servers:
         ip = server['ip_address']
@@ -116,16 +122,24 @@ def fetch_server_data():
 
 
 def fetch_psu_data():
+    global total_psu_power
+    total_psu_power = 0.0
     for psu in psus:
         try:
-            response = requests.get(psu['apiUrl'], headers={'Accept': 'application/json'},
-                                    auth=HTTPBasicAuth("root", "0penBmc"), verify=False, timeout=10)
+            response = requests.get(
+                psu['apiUrl'],
+                headers={'Accept': 'application/json'},
+                auth=HTTPBasicAuth("root", "0penBmc"),
+                verify=False,
+                timeout=10,
+            )
             response_data = response.json()
 
             if "Reading" in response_data:
                 value = response_data["Reading"]
                 if isinstance(value, (int, float)):
                     psu_power_output.labels(psu_name=psu["name"]).set(value)
+                    total_psu_power += value
                     print(f"[OK] {psu['name']} = {value}W")
                 else:
                     psu_power_output.labels(psu_name=psu["name"]).set(0)
@@ -138,10 +152,14 @@ def fetch_psu_data():
 def fetch_cdu_data():
     """Query CDU metrics and expose them via Prometheus gauges."""
 
+    global total_psu_power
+
     try:
         response = requests.get(cdu_url, timeout=10)
         response.raise_for_status()
         src_data = response.json()
+
+        t_wi = t_wo = t_cco = t_cci = t_cr = None
 
         for entry in src_data.get("responses", []):
             if not isinstance(entry, dict):
@@ -151,6 +169,17 @@ def fetch_cdu_data():
                 if not isinstance(val, (int, float)):
                     print(f"[SKIP] CDU {label} invalid value")
                     continue
+
+                if label == "T_WI":
+                    t_wi = val
+                elif label == "T_WO":
+                    t_wo = val
+                elif label == "T_CCO":
+                    t_cco = val
+                elif label == "T_CCI":
+                    t_cci = val
+                elif label == "T_CR":
+                    t_cr = val
 
                 if label.startswith("T_") or label == "Ta":
                     cdu_temperature.labels(metric=label).set(val)
@@ -162,6 +191,24 @@ def fetch_cdu_data():
                     cdu_sensor.labels(metric=label).set(val)
 
                 print(f"[OK] CDU {label} = {val}")
+
+        # Calculate additional metrics if all required values are available
+        if all(v is not None for v in (t_wi, t_wo)) and total_psu_power:
+            lpm_w = (total_psu_power / 0.97) / 69.7833 * (t_wo - t_wi)
+            cdu_calculated.labels(metric="LPM_W").set(lpm_w)
+            print(f"[OK] CDU LPM_W = {lpm_w}")
+
+        if all(v is not None for v in (t_cr, t_cco)) and total_psu_power:
+            lpm_c = total_psu_power / 69.7833 * (t_cr - t_cco)
+            cdu_calculated.labels(metric="LPM_C").set(lpm_c)
+            print(f"[OK] CDU LPM_C = {lpm_c}")
+        else:
+            lpm_c = None
+
+        if lpm_c is not None and t_cco is not None and t_cci is not None:
+            heat_cc = lpm_c * (t_cco - t_cci) * 69.7833
+            cdu_calculated.labels(metric="Heat_CC").set(heat_cc)
+            print(f"[OK] CDU Heat_CC = {heat_cc}")
 
     except Exception as e:
         print(f"[ERROR] CDU get data fail {e}")
