@@ -26,19 +26,38 @@ servers = config.get("servers", [])
 psus = config.get("psus", [])
 cdu_url = config.get("cdu_url", "")
 
-sensors_dict = { # default None_A, if API call fail.
-    'Temp_CPU0': 'None_A',  'Temp_CPU1': 'None_A',
-    'Temp_CPU0_DIMMG0': 'None_A', 'Temp_CPU0_DIMMG1': 'None_A', 'Temp_CPU1_DIMMG0': 'None_A', 'Temp_CPU1_DIMMG1': 'None_A',
-    #'Temp_SYS_Inlet': 'None_A', 'Temp_SYS_Outlet': 'None_A',
-    'Temp_GPU_1': 'None_A', 'Temp_GPU_2': 'None_A', 'Temp_GPU_3': 'None_A', 'Temp_GPU_4': 'None_A',
-    #'Temp_E3S1': 'None_A', 'Temp_E3S2': 'None_A', 'Temp_E3S3': 'None_A', 'Temp_E3S4': 'None_A',
-    #'Temp_E3S5': 'None_A', 'Temp_E3S6': 'None_A', 'Temp_E3S7': 'None_A', 'Temp_E3S8': 'None_A',
-    #'Temp_Disk3': 'None_A', 'Temp_Disk4': 'None_A', 'Temp_Disk5': 'None_A', 'Temp_Disk6': 'None_A',
-    #'Temp_Disk7': 'None_A', 'Temp_Disk8': 'None_A', 'Temp_Disk9': 'None_A', 'Temp_Disk10': 'None_A',
+# Prometheus metrics for various component temperatures
+cpu_temperature = Gauge(
+    "server_cpu_temperature_celsius",
+    "CPU temperature sensors",
+    ["server_name", "sensor_name"],
+)
+memory_temperature = Gauge(
+    "server_memory_temperature_celsius",
+    "Memory temperature sensors",
+    ["server_name", "sensor_name"],
+)
+gpu_temperature = Gauge(
+    "server_gpu_temperature_celsius",
+    "GPU temperature sensors",
+    ["server_name", "sensor_name"],
+)
+
+# Mapping sensor names to corresponding gauges
+sensor_gauge_map = {
+    "Temp_CPU0": cpu_temperature,
+    "Temp_CPU1": cpu_temperature,
+    "Temp_CPU0_DIMMG0": memory_temperature,
+    "Temp_CPU0_DIMMG1": memory_temperature,
+    "Temp_CPU1_DIMMG0": memory_temperature,
+    "Temp_CPU1_DIMMG1": memory_temperature,
+    "Temp_GPU_1": gpu_temperature,
+    "Temp_GPU_2": gpu_temperature,
+    "Temp_GPU_3": gpu_temperature,
+    "Temp_GPU_4": gpu_temperature,
 }
 
-#Prometheus metrics
-sensor_temperature = Gauge("server_sensor_temperature_celsius", "Temperature from various sensors", ["server", "sensor_name"])
+# Prometheus metrics
 server_power = Gauge("server_power_watt", "Total power reading", ["server"])
 server_fan_power = Gauge("server_fan_power_watt", "Total fan power reading", ["server"])
 server_cpu_power = Gauge("server_cpu_power_watt", "Total CPU power reading", ["server"])
@@ -75,12 +94,13 @@ def fetch_server_data():
                 value = item.get("ReadingCelsius")
                 state = item.get("Status", {}).get("State", "Unknown")
 
-                if sensor_name in sensors_dict:
+                gauge = sensor_gauge_map.get(sensor_name)
+                if gauge:
                     if isinstance(value, (int, float)):
-                        sensor_temperature.labels(server=ip, sensor_name=sensor_name).set(value)
+                        gauge.labels(server_name=ip, sensor_name=sensor_name).set(value)
                         print(f"[OK] {ip} {sensor_name} = {value}°C")
                     else:
-                        sensor_temperature.labels(server=ip, sensor_name=sensor_name).set(0)
+                        gauge.labels(server_name=ip, sensor_name=sensor_name).set(0)
                         print(f"[SKIP] {ip} {sensor_name}: No Value ,state: {state}")
 
         except Exception as e:
