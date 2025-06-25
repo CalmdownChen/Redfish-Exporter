@@ -218,20 +218,23 @@ def fetch_cdu_data():
         # Calculate additional metrics if all required values are available
         if all(v is not None for v in (t_wi, t_wo)) and total_psu_power:
             lpm_w = (total_psu_power / 0.97) / 69.7833 / (t_wo - t_wi)
-            cdu_calculated.labels(metric="LPM_W").set(lpm_w)
-            print(f"[OK] CDU LPM_W = {lpm_w}")
+            lpm_w_rounded = round(lpm_w, 2)
+            cdu_calculated.labels(metric="LPM_W").set(lpm_w_rounded)
+            print(f"[OK] CDU LPM_W = {lpm_w_rounded:.2f}")
 
         if all(v is not None for v in (t_cr, t_cco)) and total_psu_power:
             lpm_c = total_psu_power / 69.7833 / (t_cr - t_cco)
-            cdu_calculated.labels(metric="LPM_C").set(lpm_c)
-            print(f"[OK] CDU LPM_C = {lpm_c}")
+            lpm_c_rounded = round(lpm_c, 2)
+            cdu_calculated.labels(metric="LPM_C").set(lpm_c_rounded)
+            print(f"[OK] CDU LPM_C = {lpm_c_rounded:.2f}")
         else:
             lpm_c = None
 
         if lpm_c is not None and t_cco is not None and t_cci is not None:
             heat_cc = lpm_c * (t_cco - t_cci) * 69.7833
-            cdu_calculated.labels(metric="Heat_CC").set(heat_cc)
-            print(f"[OK] CDU Heat_CC = {heat_cc}")
+            heat_cc_rounded = round(heat_cc, 2)
+            cdu_calculated.labels(metric="Heat_CC").set(heat_cc_rounded)
+            print(f"[OK] CDU Heat_CC = {heat_cc_rounded:.2f}")
 
     except Exception as e:
         print(f"[ERROR] CDU get data fail {e}")
