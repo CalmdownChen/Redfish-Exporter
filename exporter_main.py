@@ -24,7 +24,7 @@ def load_config():
 config = load_config()
 servers = config.get("servers", [])
 psus = config.get("psus", [])
-cdu_url = config.get("cdu_url", "")
+cdus = config.get("cdu", [])
 
 # Prometheus metrics for various component temperatures
 cpu_temperature = Gauge(
@@ -68,6 +68,11 @@ cdu_temperature = Gauge("cdu_temperature_celsius", "Temperature metrics from CDU
 cdu_pump = Gauge("cdu_pump_metric", "Pump metrics from CDU", ["metric"])
 cdu_fan = Gauge("cdu_fan_metric", "Fan metrics from CDU", ["metric"])
 cdu_sensor = Gauge("cdu_sensor_metric", "Sensor metrics from CDU", ["metric"])
+cdu_leakage = Gauge(
+    "cdu_leakage",
+    "Leakage sensor readings from CDU",
+    ["sensor_name", "rack_name"],
+)
 
 # Calculated CDU metrics
 cdu_calculated = Gauge("cdu_calculated_metric", "Calculated metrics from CDU", ["metric"])
@@ -173,71 +178,79 @@ def fetch_psu_data():
         except Exception as e:
             print(f"[ERROR] {psu['name']} psu data get fail：{e}")
 def fetch_cdu_data():
-    """Query CDU metrics and expose them via Prometheus gauges."""
+    """Query CDU metrics for each configured CDU and expose them via Prometheus gauges."""
 
     global total_psu_power
 
-    try:
-        response = requests.get(cdu_url, timeout=10)
-        response.raise_for_status()
-        src_data = response.json()
+    for cdu in cdus:
+        url = cdu.get("url")
+        rack_name = cdu.get("name", "unknown")
+        if not url:
+            continue
 
-        t_wi = t_wo = t_cco = t_cci = t_cr = None
+        try:
+            response = requests.get(url, timeout=10)
+            response.raise_for_status()
+            src_data = response.json()
 
-        for entry in src_data.get("responses", []):
-            if not isinstance(entry, dict):
-                continue
+            t_wi = t_wo = t_cco = t_cci = t_cr = None
 
-            for label, val in entry.items():
-                if not isinstance(val, (int, float)):
-                    print(f"[SKIP] CDU {label} invalid value")
+            for entry in src_data.get("responses", []):
+                if not isinstance(entry, dict):
                     continue
 
-                if label == "T_WI":
-                    t_wi = val
-                elif label == "T_WO":
-                    t_wo = val
-                elif label == "T_CCO":
-                    t_cco = val
-                elif label == "T_CCI":
-                    t_cci = val
-                elif label == "T_CR":
-                    t_cr = val
+                for label, val in entry.items():
+                    if not isinstance(val, (int, float)):
+                        print(f"[SKIP] {rack_name} {label} invalid value")
+                        continue
 
-                if label.startswith("T_") or label == "Ta":
-                    cdu_temperature.labels(metric=label).set(val)
-                elif label.startswith("RPM_P") or label.startswith("POW_P") or label.startswith("PWM_P"):
-                    cdu_pump.labels(metric=label).set(val)
-                elif label.startswith("RPM_F") or label.startswith("POW_F") or label.startswith("PWM_F"):
-                    cdu_fan.labels(metric=label).set(val)
-                else:
-                    cdu_sensor.labels(metric=label).set(val)
+                    if label in ("Sensor_L1", "Sensor_L2", "Sensor_RL1", "Sensor_RL2"):
+                        cdu_leakage.labels(sensor_name=label, rack_name=rack_name).set(val)
 
-                print(f"[OK] CDU {label} = {val}")
+                    if label == "T_WI":
+                        t_wi = val
+                    elif label == "T_WO":
+                        t_wo = val
+                    elif label == "T_CCO":
+                        t_cco = val
+                    elif label == "T_CCI":
+                        t_cci = val
+                    elif label == "T_CR":
+                        t_cr = val
 
-        # Calculate additional metrics if all required values are available
-        if all(v is not None for v in (t_wi, t_wo)) and total_psu_power:
-            lpm_w = (total_psu_power / 0.97) / 69.7833 / (t_wo - t_wi)
-            lpm_w_rounded = round(lpm_w, 2)
-            cdu_calculated.labels(metric="LPM_W").set(lpm_w_rounded)
-            print(f"[OK] CDU LPM_W = {lpm_w_rounded:.2f}")
+                    if label.startswith("T_") or label == "Ta":
+                        cdu_temperature.labels(metric=label).set(val)
+                    elif label.startswith("RPM_P") or label.startswith("POW_P") or label.startswith("PWM_P"):
+                        cdu_pump.labels(metric=label).set(val)
+                    elif label.startswith("RPM_F") or label.startswith("POW_F") or label.startswith("PWM_F"):
+                        cdu_fan.labels(metric=label).set(val)
+                    else:
+                        cdu_sensor.labels(metric=label).set(val)
 
-        if all(v is not None for v in (t_cr, t_cco)) and total_psu_power:
-            lpm_c = total_psu_power / 69.7833 / (t_cr - t_cco)
-            lpm_c_rounded = round(lpm_c, 2)
-            cdu_calculated.labels(metric="LPM_C").set(lpm_c_rounded)
-            print(f"[OK] CDU LPM_C = {lpm_c_rounded:.2f}")
-        else:
-            lpm_c = None
+                    print(f"[OK] {rack_name} {label} = {val}")
+            # Calculate additional metrics if all required values are available
+            if all(v is not None for v in (t_wi, t_wo)) and total_psu_power:
+                lpm_w = (total_psu_power / 0.97) / 69.7833 / (t_wo - t_wi)
+                lpm_w_rounded = round(lpm_w, 2)
+                cdu_calculated.labels(metric="LPM_W").set(lpm_w_rounded)
+                print(f"[OK] {rack_name} LPM_W = {lpm_w_rounded:.2f}")
 
-        if lpm_c is not None and t_cco is not None and t_cci is not None:
-            heat_cc = lpm_c * (t_cco - t_cci) * 69.7833
-            heat_cc_rounded = round(heat_cc, 2)
-            cdu_calculated.labels(metric="Heat_CC").set(heat_cc_rounded)
-            print(f"[OK] CDU Heat_CC = {heat_cc_rounded:.2f}")
+            if all(v is not None for v in (t_cr, t_cco)) and total_psu_power:
+                lpm_c = total_psu_power / 69.7833 / (t_cr - t_cco)
+                lpm_c_rounded = round(lpm_c, 2)
+                cdu_calculated.labels(metric="LPM_C").set(lpm_c_rounded)
+                print(f"[OK] {rack_name} LPM_C = {lpm_c_rounded:.2f}")
+            else:
+                lpm_c = None
 
-    except Exception as e:
-        print(f"[ERROR] CDU get data fail {e}")
+            if lpm_c is not None and t_cco is not None and t_cci is not None:
+                heat_cc = lpm_c * (t_cco - t_cci) * 69.7833
+                heat_cc_rounded = round(heat_cc, 2)
+                cdu_calculated.labels(metric="Heat_CC").set(heat_cc_rounded)
+                print(f"[OK] {rack_name} Heat_CC = {heat_cc_rounded:.2f}")
+
+        except Exception as e:
+            print(f"[ERROR] {rack_name} get data fail {e}")
 
 
 if __name__ == '__main__':
