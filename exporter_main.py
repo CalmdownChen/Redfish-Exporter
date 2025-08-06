@@ -194,6 +194,12 @@ def fetch_cdu_data():
             src_data = response.json()
 
             t_wi = t_wo = t_cco = t_cci = t_cr = None
+            leakage_values = {
+                "Sensor_L1": None,
+                "Sensor_L2": None,
+                "Sensor_RL1": None,
+                "Sensor_RL2": None,
+            }
 
             for entry in src_data.get("responses", []):
                 if not isinstance(entry, dict):
@@ -204,8 +210,8 @@ def fetch_cdu_data():
                         print(f"[SKIP] {rack_name} {label} invalid value")
                         continue
 
-                    if label in ("Sensor_L1", "Sensor_L2", "Sensor_RL1", "Sensor_RL2"):
-                        cdu_leakage.labels(sensor_name=label, rack_name=rack_name).set(val)
+                    if label in leakage_values:
+                        leakage_values[label] = val
 
                     if label == "T_WI":
                         t_wi = val
@@ -228,6 +234,17 @@ def fetch_cdu_data():
                         cdu_sensor.labels(metric=label).set(val)
 
                     print(f"[OK] {rack_name} {label} = {val}")
+
+            leak_count = sum(1 for v in leakage_values.values() if v == 1)
+            if leak_count >= 2:
+                for sensor_name, value in leakage_values.items():
+                    cdu_leakage.labels(sensor_name=sensor_name, rack_name=rack_name).set(
+                        0 if value is None else value
+                    )
+            else:
+                for sensor_name in leakage_values:
+                    cdu_leakage.labels(sensor_name=sensor_name, rack_name=rack_name).set(0)
+
             # Calculate additional metrics if all required values are available
             if all(v is not None for v in (t_wi, t_wo)) and total_psu_power:
                 lpm_w = (total_psu_power / 0.97) / 69.7833 / (t_wo - t_wi)
