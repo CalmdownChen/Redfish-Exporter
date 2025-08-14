@@ -63,7 +63,11 @@ server_fan_power = Gauge("server_fan_power_watt", "Total fan power reading", ["s
 server_cpu_power = Gauge("server_cpu_power_watt", "Total CPU power reading", ["server"])
 server_gpu_power = Gauge("server_gpu_power_watt", "Total GPU power reading", ["server"])
 server_mem_power = Gauge("server_mem_power_watt", "Total memory power reading", ["server"])
-psu_power_output = Gauge("psu_output_power_watt", "Output power reading from PSU", ["psu_name"])
+psu_power_output = Gauge(
+    "psu_output_power_watt",
+    "Output power reading from PSU",
+    ["psu_name", "rack_name"],
+)
 cdu_temperature = Gauge("cdu_temperature_celsius", "Temperature metrics from CDU", ["metric"])
 cdu_pump = Gauge("cdu_pump_metric", "Pump metrics from CDU", ["metric"])
 cdu_fan = Gauge("cdu_fan_metric", "Fan metrics from CDU", ["metric"])
@@ -166,11 +170,15 @@ def fetch_psu_data():
             if "Reading" in response_data:
                 value = response_data["Reading"]
                 if isinstance(value, (int, float)):
-                    psu_power_output.labels(psu_name=psu["name"]).set(value)
+                    psu_power_output.labels(
+                        psu_name=psu["name"], rack_name=psu.get("rack_name", "unknown")
+                    ).set(value)
                     total_psu_power += value
                     print(f"[OK] {psu['name']} = {value}W")
                 else:
-                    psu_power_output.labels(psu_name=psu["name"]).set(0)
+                    psu_power_output.labels(
+                        psu_name=psu["name"], rack_name=psu.get("rack_name", "unknown")
+                    ).set(0)
                     print(f"[WARN] {psu['name']} No value")
             else:
                 print(f"[WARN] {psu['name']} Sensor un-avaliable ")
