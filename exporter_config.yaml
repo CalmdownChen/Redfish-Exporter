@@ -65,6 +65,7 @@ servers:
 
 psus:
   - name: 'Powershelf_1'
+    rack_name: 'Rack_1'
     apiUrl: 'https://192.168.2.50/redfish/v1/Chassis/chassis/Sensors/chassis_output_power'
 
 cdu:
