@@ -69,5 +69,5 @@ psus:
     apiUrl: 'https://192.168.2.50/redfish/v1/Chassis/chassis/Sensors/chassis_output_power'
 
 cdu:
-  - name: 'cdu1'
+  - rack_name: 'cdu1'
     url: "http://192.168.2.201:1880/getall"

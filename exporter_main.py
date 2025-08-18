@@ -68,10 +68,26 @@ psu_power_output = Gauge(
     "Output power reading from PSU",
     ["psu_name", "rack_name"],
 )
-cdu_temperature = Gauge("cdu_temperature_celsius", "Temperature metrics from CDU", ["metric"])
-cdu_pump = Gauge("cdu_pump_metric", "Pump metrics from CDU", ["metric"])
-cdu_fan = Gauge("cdu_fan_metric", "Fan metrics from CDU", ["metric"])
-cdu_sensor = Gauge("cdu_sensor_metric", "Sensor metrics from CDU", ["metric"])
+cdu_temperature = Gauge(
+    "cdu_temperature_celsius",
+    "Temperature metrics from CDU",
+    ["metric", "rack_name"],
+)
+cdu_pump = Gauge(
+    "cdu_pump_metric",
+    "Pump metrics from CDU",
+    ["metric", "rack_name"],
+)
+cdu_fan = Gauge(
+    "cdu_fan_metric",
+    "Fan metrics from CDU",
+    ["metric", "rack_name"],
+)
+cdu_sensor = Gauge(
+    "cdu_sensor_metric",
+    "Sensor metrics from CDU",
+    ["metric", "rack_name"],
+)
 cdu_leakage = Gauge(
     "cdu_leakage",
     "Leakage sensor readings from CDU",
@@ -192,7 +208,7 @@ def fetch_cdu_data():
 
     for cdu in cdus:
         url = cdu.get("url")
-        rack_name = cdu.get("name", "unknown")
+        rack_name = cdu.get("rack_name", "unknown")
         if not url:
             continue
 
@@ -233,13 +249,13 @@ def fetch_cdu_data():
                         t_cr = val
 
                     if label.startswith("T_") or label == "Ta":
-                        cdu_temperature.labels(metric=label).set(val)
+                        cdu_temperature.labels(metric=label, rack_name=rack_name).set(val)
                     elif label.startswith("RPM_P") or label.startswith("POW_P") or label.startswith("PWM_P"):
-                        cdu_pump.labels(metric=label).set(val)
+                        cdu_pump.labels(metric=label, rack_name=rack_name).set(val)
                     elif label.startswith("RPM_F") or label.startswith("POW_F") or label.startswith("PWM_F"):
-                        cdu_fan.labels(metric=label).set(val)
+                        cdu_fan.labels(metric=label, rack_name=rack_name).set(val)
                     else:
-                        cdu_sensor.labels(metric=label).set(val)
+                        cdu_sensor.labels(metric=label, rack_name=rack_name).set(val)
 
                     print(f"[OK] {rack_name} {label} = {val}")
 
