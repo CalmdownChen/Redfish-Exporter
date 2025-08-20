@@ -265,9 +265,25 @@ def fetch_cdu_data():
                     cdu_leakage.labels(sensor_name=sensor_name, rack_name=rack_name).set(
                         0 if value is None else value
                     )
+                for sensor_name in leakage_values:
+                    cdu_leakage.labels(
+                        sensor_name=sensor_name,
+                        rack_name=f"keep_watching_{rack_name}",
+                    ).set(0)
+            elif leak_count == 1:
+                for sensor_name, value in leakage_values.items():
+                    cdu_leakage.labels(sensor_name=sensor_name, rack_name=rack_name).set(0)
+                    cdu_leakage.labels(
+                        sensor_name=sensor_name,
+                        rack_name=f"keep_watching_{rack_name}",
+                    ).set(0 if value is None else value)
             else:
                 for sensor_name in leakage_values:
                     cdu_leakage.labels(sensor_name=sensor_name, rack_name=rack_name).set(0)
+                    cdu_leakage.labels(
+                        sensor_name=sensor_name,
+                        rack_name=f"keep_watching_{rack_name}",
+                    ).set(0)
 
             # Calculate additional metrics if all required values are available
             if all(v is not None for v in (t_wi, t_wo)) and total_psu_power:
