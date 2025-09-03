@@ -68,6 +68,11 @@ psu_power_output = Gauge(
     "Output power reading from PSU",
     ["psu_name", "rack_name"],
 )
+psu_power_status = Gauge(
+    "psu_power_status",
+    "PSU health status (0: OK, 1: Not OK)",
+    ["psu_name", "rack_name"],
+)
 cdu_temperature = Gauge(
     "cdu_temperature_celsius",
     "Temperature metrics from CDU",
@@ -174,8 +179,9 @@ def fetch_psu_data():
     total_psu_power = 0.0
     for psu in psus:
         try:
+            base_url = f"https://{psu['ip_address']}/redfish/v1"
             response = requests.get(
-                psu['apiUrl'],
+                f"{base_url}/Chassis/chassis/Sensors/chassis_output_power",
                 headers={'Accept': 'application/json'},
                 auth=HTTPBasicAuth("root", "0penBmc"),
                 verify=False,
@@ -198,6 +204,31 @@ def fetch_psu_data():
                     print(f"[WARN] {psu['name']} No value")
             else:
                 print(f"[WARN] {psu['name']} Sensor un-avaliable ")
+
+            for i in range(1, 13):
+                try:
+                    status_resp = requests.get(
+                        f"{base_url}/Chassis/chassis/Power/Oem/tsmc/PSU{i}",
+                        headers={'Accept': 'application/json'},
+                        auth=HTTPBasicAuth("root", "0penBmc"),
+                        verify=False,
+                        timeout=10,
+                    )
+                    status_data = status_resp.json()
+                    health = status_data.get('Status', {}).get('Health')
+                    metric_value = 0 if health == "OK" else 1
+                    psu_power_status.labels(
+                        psu_name=f"PSU_{i}", rack_name=psu.get("rack_name", "unknown")
+                    ).set(metric_value)
+                    if health == "OK":
+                        print(f"[OK] {psu['name']} PSU_{i} Health {health}")
+                    else:
+                        print(f"[WARN] {psu['name']} PSU_{i} Health {health}")
+                except Exception as e:
+                    psu_power_status.labels(
+                        psu_name=f"PSU_{i}", rack_name=psu.get("rack_name", "unknown")
+                    ).set(1)
+                    print(f"[ERROR] {psu['name']} PSU_{i} status get fail：{e}")
 
         except Exception as e:
             print(f"[ERROR] {psu['name']} psu data get fail：{e}")
