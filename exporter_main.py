@@ -98,6 +98,16 @@ cdu_leakage = Gauge(
     "Leakage sensor readings from CDU",
     ["sensor_name", "rack_name"],
 )
+cdu_pump_fail = Gauge(
+    "cdu_pump_fail",
+    "CDU pump failure status (1: fail, 0: ok)",
+    ["sensor_name", "rack_name"],
+)
+cdu_fan_fail = Gauge(
+    "cdu_fan_fail",
+    "CDU fan failure status (1: fail, 0: ok)",
+    ["sensor_name", "rack_name"],
+)
 
 # Calculated CDU metrics
 cdu_calculated = Gauge("cdu_calculated_metric", "Calculated metrics from CDU", ["metric"])
@@ -255,6 +265,10 @@ def fetch_cdu_data():
                 "Sensor_RL1": None,
                 "Sensor_RL2": None,
             }
+            pump_rpm = {}
+            pump_pwm = {}
+            fan_rpm = {}
+            fan_pwm = {}
 
             for entry in src_data.get("responses", []):
                 if not isinstance(entry, dict):
@@ -283,8 +297,16 @@ def fetch_cdu_data():
                         cdu_temperature.labels(metric=label, rack_name=rack_name).set(val)
                     elif label.startswith("RPM_P") or label.startswith("POW_P") or label.startswith("PWM_P"):
                         cdu_pump.labels(metric=label, rack_name=rack_name).set(val)
+                        if label.startswith("RPM_P"):
+                            pump_rpm[label.replace("RPM_P", "")] = val
+                        elif label.startswith("PWM_P"):
+                            pump_pwm[label.replace("PWM_P", "")] = val
                     elif label.startswith("RPM_F") or label.startswith("POW_F") or label.startswith("PWM_F"):
                         cdu_fan.labels(metric=label, rack_name=rack_name).set(val)
+                        if label.startswith("RPM_F"):
+                            fan_rpm[label.replace("RPM_F", "")] = val
+                        elif label.startswith("PWM_F"):
+                            fan_pwm[label.replace("PWM_F", "")] = val
                     else:
                         cdu_sensor.labels(metric=label, rack_name=rack_name).set(val)
 
@@ -314,6 +336,20 @@ def fetch_cdu_data():
                         sensor_name=sensor_name,
                         rack_name=f"keep-watching-{rack_name}",
                     ).set(0)
+
+            # Evaluate pump failure conditions
+            for idx in set(pump_rpm) | set(pump_pwm):
+                rpm = pump_rpm.get(idx)
+                pwm = pump_pwm.get(idx)
+                fail = 1 if rpm is not None and pwm is not None and rpm < 100 and pwm != 0 else 0
+                cdu_pump_fail.labels(sensor_name=f"Pump_{idx}", rack_name=rack_name).set(fail)
+
+            # Evaluate fan failure conditions
+            for idx in set(fan_rpm) | set(fan_pwm):
+                rpm = fan_rpm.get(idx)
+                pwm = fan_pwm.get(idx)
+                fail = 1 if rpm is not None and pwm is not None and rpm < 100 and pwm != 0 else 0
+                cdu_fan_fail.labels(sensor_name=f"Fan_{idx}", rack_name=rack_name).set(fail)
 
             # Calculate additional metrics if all required values are available
             if all(v is not None for v in (t_wi, t_wo)) and total_psu_power:
