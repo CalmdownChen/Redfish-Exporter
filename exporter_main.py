@@ -93,6 +93,11 @@ cdu_sensor = Gauge(
     "Sensor metrics from CDU",
     ["metric", "rack_name"],
 )
+cdu_tank_level = Gauge(
+    "cdu_tank_level",
+    "Water tank level status from CDU",
+    ["sensor_name", "rack_name"],
+)
 cdu_leakage = Gauge(
     "cdu_leakage",
     "Leakage sensor readings from CDU",
@@ -265,6 +270,11 @@ def fetch_cdu_data():
                 "Sensor_RL1": None,
                 "Sensor_RL2": None,
             }
+            tank_level_sensors = {
+                "Sensor_LEVH": None,
+                "Sensor_LEVM": None,
+                "Sensor_LEVL": None,
+            }
             pump_rpm = {}
             pump_pwm = {}
             fan_rpm = {}
@@ -281,6 +291,8 @@ def fetch_cdu_data():
 
                     if label in leakage_values:
                         leakage_values[label] = val
+                    if label in tank_level_sensors:
+                        tank_level_sensors[label] = val
 
                     if label == "T_WI":
                         t_wi = val
@@ -336,6 +348,27 @@ def fetch_cdu_data():
                         sensor_name=sensor_name,
                         rack_name=f"keep-watching-{rack_name}",
                     ).set(0)
+
+            # Evaluate tank level conditions
+            sensor_levh = tank_level_sensors.get("Sensor_LEVH")
+            sensor_levm = tank_level_sensors.get("Sensor_LEVM")
+            sensor_levl = tank_level_sensors.get("Sensor_LEVL")
+
+            level_medium = level_low = critical_low = 0
+            if sensor_levl == 0:
+                critical_low = 1
+            elif sensor_levm == 0:
+                level_low = 1
+            elif sensor_levh == 0:
+                level_medium = 1
+
+            cdu_tank_level.labels(sensor_name="Level_Medium", rack_name=rack_name).set(
+                level_medium
+            )
+            cdu_tank_level.labels(sensor_name="Level_Low", rack_name=rack_name).set(level_low)
+            cdu_tank_level.labels(sensor_name="Critical_Low", rack_name=rack_name).set(
+                critical_low
+            )
 
             # Evaluate pump failure conditions
             for idx in set(pump_rpm) | set(pump_pwm):
