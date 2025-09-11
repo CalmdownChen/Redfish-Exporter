@@ -73,6 +73,11 @@ psu_power_status = Gauge(
     "PSU health status (0: OK, 1: Not OK)",
     ["psu_name", "rack_name"],
 )
+psu_chassis_status = Gauge(
+    "psu_chassis_status",
+    "PSU chassis input health status (0: OK, 1: Not OK)",
+    ["chassis_name", "rack_name"],
+)
 cdu_temperature = Gauge(
     "cdu_temperature_celsius",
     "Temperature metrics from CDU",
@@ -244,6 +249,38 @@ def fetch_psu_data():
                         psu_name=f"PSU_{i}", rack_name=psu.get("rack_name", "unknown")
                     ).set(1)
                     print(f"[ERROR] {psu['name']} PSU_{i} status get fail：{e}")
+
+            for chassis_label, sensor_name in [
+                ("Chassis_A", "chassis_A_input_Voltage"),
+                ("Chassis_B", "chassis_B_input_Voltage"),
+            ]:
+                try:
+                    chassis_resp = requests.get(
+                        f"{base_url}/Chassis/chassis/Sensors/{sensor_name}",
+                        headers={'Accept': 'application/json'},
+                        auth=HTTPBasicAuth("root", "0penBmc"),
+                        verify=False,
+                        timeout=10,
+                    )
+                    chassis_data = chassis_resp.json()
+                    health = chassis_data.get("Status", {}).get("Health")
+                    metric_value = 0 if health == "OK" else 1
+                    psu_chassis_status.labels(
+                        chassis_name=chassis_label,
+                        rack_name=psu.get("rack_name", "unknown"),
+                    ).set(metric_value)
+                    if health == "OK":
+                        print(f"[OK] {psu['name']} {chassis_label} Health {health}")
+                    else:
+                        print(f"[WARN] {psu['name']} {chassis_label} Health {health}")
+                except Exception as e:
+                    psu_chassis_status.labels(
+                        chassis_name=chassis_label,
+                        rack_name=psu.get("rack_name", "unknown"),
+                    ).set(1)
+                    print(
+                        f"[ERROR] {psu['name']} {chassis_label} status get fail：{e}"
+                    )
 
         except Exception as e:
             print(f"[ERROR] {psu['name']} psu data get fail：{e}")
