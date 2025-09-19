@@ -30,17 +30,17 @@ cdus = config.get("cdu", [])
 cpu_temperature = Gauge(
     "server_cpu_temperature_celsius",
     "CPU temperature sensors",
-    ["server_name", "sensor_name"],
+    ["server_name", "sensor_name", "rack_name"],
 )
 memory_temperature = Gauge(
     "server_memory_temperature_celsius",
     "Memory temperature sensors",
-    ["server_name", "sensor_name"],
+    ["server_name", "sensor_name", "rack_name"],
 )
 gpu_temperature = Gauge(
     "server_gpu_temperature_celsius",
     "GPU temperature sensors",
-    ["server_name", "sensor_name"],
+    ["server_name", "sensor_name", "rack_name"],
 )
 
 # Mapping sensor names to corresponding gauges
@@ -58,11 +58,21 @@ sensor_gauge_map = {
 }
 
 # Prometheus metrics
-server_power = Gauge("server_power_watt", "Total power reading", ["server"])
-server_fan_power = Gauge("server_fan_power_watt", "Total fan power reading", ["server"])
-server_cpu_power = Gauge("server_cpu_power_watt", "Total CPU power reading", ["server"])
-server_gpu_power = Gauge("server_gpu_power_watt", "Total GPU power reading", ["server"])
-server_mem_power = Gauge("server_mem_power_watt", "Total memory power reading", ["server"])
+server_power = Gauge(
+    "server_power_watt", "Total power reading", ["server", "rack_name"]
+)
+server_fan_power = Gauge(
+    "server_fan_power_watt", "Total fan power reading", ["server", "rack_name"]
+)
+server_cpu_power = Gauge(
+    "server_cpu_power_watt", "Total CPU power reading", ["server", "rack_name"]
+)
+server_gpu_power = Gauge(
+    "server_gpu_power_watt", "Total GPU power reading", ["server", "rack_name"]
+)
+server_mem_power = Gauge(
+    "server_mem_power_watt", "Total memory power reading", ["server", "rack_name"]
+)
 psu_power_output = Gauge(
     "psu_output_power_watt",
     "Output power reading from PSU",
@@ -128,6 +138,7 @@ total_psu_power = 0.0
 def fetch_server_data():
     for server in servers:
         ip = server['ip_address']
+        rack_name = server.get('rack_name', 'unknown')
         base_url = f"https://{ip}/redfish/v1"
         auth = HTTPBasicAuth("admin", "password")
 
@@ -147,10 +158,18 @@ def fetch_server_data():
                 gauge = sensor_gauge_map.get(sensor_name)
                 if gauge:
                     if isinstance(value, (int, float)):
-                        gauge.labels(server_name=ip, sensor_name=sensor_name).set(value)
+                        gauge.labels(
+                            server_name=ip,
+                            sensor_name=sensor_name,
+                            rack_name=rack_name,
+                        ).set(value)
                         print(f"[OK] {ip} {sensor_name} = {value}°C")
                     else:
-                        gauge.labels(server_name=ip, sensor_name=sensor_name).set(0)
+                        gauge.labels(
+                            server_name=ip,
+                            sensor_name=sensor_name,
+                            rack_name=rack_name,
+                        ).set(0)
                         print(f"[SKIP] {ip} {sensor_name}: No Value ,state: {state}")
 
         except Exception as e:
@@ -167,7 +186,7 @@ def fetch_server_data():
 
         if "ASUS" in server['name']:
             for gauge in power_metrics.values():
-                gauge.labels(server=ip).set(0)
+                gauge.labels(server=ip, rack_name=rack_name).set(0)
             continue
 
         for sensor, gauge in power_metrics.items():
@@ -184,10 +203,10 @@ def fetch_server_data():
 
                 power = data.get("Reading")
                 if isinstance(power, (int, float)):
-                    gauge.labels(server=ip).set(power)
+                    gauge.labels(server=ip, rack_name=rack_name).set(power)
                     print(f"[OK] {ip} {sensor} = {power}W")
                 else:
-                    gauge.labels(server=ip).set(0)
+                    gauge.labels(server=ip, rack_name=rack_name).set(0)
                     print(f"[SKIP] {ip} {sensor} invalid value")
             except Exception as e:
                 print(f"[ERROR] {ip} {sensor} API error: {e}")

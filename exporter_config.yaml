@@ -2,10 +2,12 @@ servers:
   - name: 'ASUS_1'
     location: 'OU-1'
     ip_address: '192.168.2.1'
+    rack_name: 'Rack_1'
 
   - name: 'ASUS_2'
     location: 'OU-2'
     ip_address: '192.168.2.2'
+    rack_name: 'Rack_1'
 
   # - name: 'Node_3'
   #   location: 'OU-3'
@@ -14,54 +16,67 @@ servers:
   - name: 'Node_4'
     location: 'OU-4'
     ip_address: '192.168.2.9'
+    rack_name: 'Rack_1'
 
   - name: 'Node_5'
     location: 'OU-5'
     ip_address: '192.168.2.10'
+    rack_name: 'Rack_1'
 
   - name: 'Node_6'
     location: 'OU-6'
     ip_address: '192.168.2.22'
+    rack_name: 'Rack_1'
 
   - name: 'Node_7'
     location: 'OU-7'
     ip_address: '192.168.2.24'
+    rack_name: 'Rack_1'
 
   - name: 'Node_8'
     location: 'OU-8'
     ip_address: '192.168.2.26'
+    rack_name: 'Rack_1'
 
   - name: 'Node_9'
     location: 'OU-9'
     ip_address: '192.168.2.27'
+    rack_name: 'Rack_1'
 
   - name: 'Node_10'
     location: 'OU-10'
     ip_address: '192.168.2.30'
+    rack_name: 'Rack_1'
 
   - name: 'Node_11'
     location: 'OU-11'
     ip_address: '192.168.2.31'
+    rack_name: 'Rack_1'
 
   - name: 'Node_12'
     location: 'OU-12'
     ip_address: '192.168.2.32'
+    rack_name: 'Rack_1'
 
   - name: 'Node_13'
     location: 'OU-13'
     ip_address: '192.168.2.33'
+    rack_name: 'Rack_1'
 
   - name: 'Node_14'
     location: 'OU-14'
     ip_address: '192.168.2.34'
+    rack_name: 'Rack_1'
 
   - name: 'Node_15'
     location: 'OU-15'
     ip_address: '192.168.2.35'
+    rack_name: 'Rack_1'
 
   - name: 'Node_16'
     location: 'OU-16'
     ip_address: '192.168.2.23'
+    rack_name: 'Rack_1'
 
 psus:
   - name: 'Powershelf_1'
