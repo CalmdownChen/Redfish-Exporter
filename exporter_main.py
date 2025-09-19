@@ -68,15 +68,15 @@ psu_power_output = Gauge(
     "Output power reading from PSU",
     ["psu_name", "rack_name"],
 )
-psu_power_status = Gauge(
-    "psu_power_status",
+powershelf_psu_fail = Gauge(
+    "powershelf_psu_fail",
     "PSU health status (0: OK, 1: Not OK)",
-    ["psu_name", "rack_name"],
+    ["sensor_name", "rack_name"],
 )
-psu_chassis_status = Gauge(
-    "psu_chassis_status",
+powershelf_chassis_fail = Gauge(
+    "powershelf_chassis_fail",
     "PSU chassis input health status (0: OK, 1: Not OK)",
-    ["chassis_name", "rack_name"],
+    ["sensor_name", "rack_name"],
 )
 cdu_temperature = Gauge(
     "cdu_temperature_celsius",
@@ -237,16 +237,18 @@ def fetch_psu_data():
                     status_data = status_resp.json()
                     health = status_data.get('Status', {}).get('Health')
                     metric_value = 0 if health == "OK" else 1
-                    psu_power_status.labels(
-                        psu_name=f"PSU_{i}", rack_name=psu.get("rack_name", "unknown")
+                    powershelf_psu_fail.labels(
+                        sensor_name=f"PSU_{i}",
+                        rack_name=psu.get("rack_name", "unknown"),
                     ).set(metric_value)
                     if health == "OK":
                         print(f"[OK] {psu['name']} PSU_{i} Health {health}")
                     else:
                         print(f"[WARN] {psu['name']} PSU_{i} Health {health}")
                 except Exception as e:
-                    psu_power_status.labels(
-                        psu_name=f"PSU_{i}", rack_name=psu.get("rack_name", "unknown")
+                    powershelf_psu_fail.labels(
+                        sensor_name=f"PSU_{i}",
+                        rack_name=psu.get("rack_name", "unknown"),
                     ).set(1)
                     print(f"[ERROR] {psu['name']} PSU_{i} status get fail：{e}")
 
@@ -265,8 +267,8 @@ def fetch_psu_data():
                     chassis_data = chassis_resp.json()
                     health = chassis_data.get("Status", {}).get("Health")
                     metric_value = 0 if health == "OK" else 1
-                    psu_chassis_status.labels(
-                        chassis_name=chassis_label,
+                    powershelf_chassis_fail.labels(
+                        sensor_name=chassis_label,
                         rack_name=psu.get("rack_name", "unknown"),
                     ).set(metric_value)
                     if health == "OK":
@@ -274,8 +276,8 @@ def fetch_psu_data():
                     else:
                         print(f"[WARN] {psu['name']} {chassis_label} Health {health}")
                 except Exception as e:
-                    psu_chassis_status.labels(
-                        chassis_name=chassis_label,
+                    powershelf_chassis_fail.labels(
+                        sensor_name=chassis_label,
                         rack_name=psu.get("rack_name", "unknown"),
                     ).set(1)
                     print(
