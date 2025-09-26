@@ -226,63 +226,97 @@ def fetch_psu_data():
                 print(f"[WARN] {psu['name']} Sensor un-avaliable ")
 
             for i in range(1, 13):
-                try:
-                    status_resp = requests.get(
-                        f"{base_url}/Chassis/chassis/Power/Oem/tsmc/PSU{i}",
-                        headers={'Accept': 'application/json'},
-                        auth=HTTPBasicAuth("root", "0penBmc"),
-                        verify=False,
-                        timeout=10,
-                    )
-                    status_data = status_resp.json()
-                    health = status_data.get('Status', {}).get('Health')
-                    metric_value = 0 if health == "OK" else 1
-                    powershelf_psu_fail.labels(
-                        sensor_name=f"PSU_{i}",
-                        rack_name=psu.get("rack_name", "unknown"),
-                    ).set(metric_value)
-                    if health == "OK":
-                        print(f"[OK] {psu['name']} PSU_{i} Health {health}")
-                    else:
-                        print(f"[WARN] {psu['name']} PSU_{i} Health {health}")
-                except Exception as e:
+                success = False
+                last_exception = None
+                for attempt in range(2):
+                    try:
+                        status_resp = requests.get(
+                            f"{base_url}/Chassis/chassis/Power/Oem/tsmc/PSU{i}",
+                            headers={'Accept': 'application/json'},
+                            auth=HTTPBasicAuth("root", "0penBmc"),
+                            verify=False,
+                            timeout=10,
+                        )
+                        status_data = status_resp.json()
+                        health = status_data.get('Status', {}).get('Health')
+                        metric_value = 0 if health == "OK" else 1
+                        powershelf_psu_fail.labels(
+                            sensor_name=f"PSU_{i}",
+                            rack_name=psu.get("rack_name", "unknown"),
+                        ).set(metric_value)
+                        if health == "OK":
+                            print(f"[OK] {psu['name']} PSU_{i} Health {health}")
+                        else:
+                            print(f"[WARN] {psu['name']} PSU_{i} Health {health}")
+                        success = True
+                        break
+                    except (requests.RequestException, ValueError) as e:
+                        last_exception = e
+                        if attempt == 0:
+                            print(
+                                f"[WARN] {psu['name']} PSU_{i} status attempt {attempt + 1} failed: {e}"
+                            )
+                if not success:
                     powershelf_psu_fail.labels(
                         sensor_name=f"PSU_{i}",
                         rack_name=psu.get("rack_name", "unknown"),
                     ).set(1)
-                    print(f"[ERROR] {psu['name']} PSU_{i} status get fail：{e}")
+                    if last_exception is not None:
+                        print(
+                            f"[ERROR] {psu['name']} PSU_{i} status get fail：{last_exception}"
+                        )
+                    else:
+                        print(
+                            f"[ERROR] {psu['name']} PSU_{i} status get fail：Unknown error"
+                        )
 
             for chassis_label, sensor_name in [
                 ("Chassis_A", "chassis_A_input_Voltage"),
                 ("Chassis_B", "chassis_B_input_Voltage"),
             ]:
-                try:
-                    chassis_resp = requests.get(
-                        f"{base_url}/Chassis/chassis/Sensors/{sensor_name}",
-                        headers={'Accept': 'application/json'},
-                        auth=HTTPBasicAuth("root", "0penBmc"),
-                        verify=False,
-                        timeout=10,
-                    )
-                    chassis_data = chassis_resp.json()
-                    health = chassis_data.get("Status", {}).get("Health")
-                    metric_value = 0 if health == "OK" else 1
-                    powershelf_chassis_fail.labels(
-                        sensor_name=chassis_label,
-                        rack_name=psu.get("rack_name", "unknown"),
-                    ).set(metric_value)
-                    if health == "OK":
-                        print(f"[OK] {psu['name']} {chassis_label} Health {health}")
-                    else:
-                        print(f"[WARN] {psu['name']} {chassis_label} Health {health}")
-                except Exception as e:
+                success = False
+                last_exception = None
+                for attempt in range(2):
+                    try:
+                        chassis_resp = requests.get(
+                            f"{base_url}/Chassis/chassis/Sensors/{sensor_name}",
+                            headers={'Accept': 'application/json'},
+                            auth=HTTPBasicAuth("root", "0penBmc"),
+                            verify=False,
+                            timeout=10,
+                        )
+                        chassis_data = chassis_resp.json()
+                        health = chassis_data.get("Status", {}).get("Health")
+                        metric_value = 0 if health == "OK" else 1
+                        powershelf_chassis_fail.labels(
+                            sensor_name=chassis_label,
+                            rack_name=psu.get("rack_name", "unknown"),
+                        ).set(metric_value)
+                        if health == "OK":
+                            print(f"[OK] {psu['name']} {chassis_label} Health {health}")
+                        else:
+                            print(f"[WARN] {psu['name']} {chassis_label} Health {health}")
+                        success = True
+                        break
+                    except (requests.RequestException, ValueError) as e:
+                        last_exception = e
+                        if attempt == 0:
+                            print(
+                                f"[WARN] {psu['name']} {chassis_label} status attempt {attempt + 1} failed: {e}"
+                            )
+                if not success:
                     powershelf_chassis_fail.labels(
                         sensor_name=chassis_label,
                         rack_name=psu.get("rack_name", "unknown"),
                     ).set(1)
-                    print(
-                        f"[ERROR] {psu['name']} {chassis_label} status get fail：{e}"
-                    )
+                    if last_exception is not None:
+                        print(
+                            f"[ERROR] {psu['name']} {chassis_label} status get fail：{last_exception}"
+                        )
+                    else:
+                        print(
+                            f"[ERROR] {psu['name']} {chassis_label} status get fail：Unknown error"
+                        )
 
         except Exception as e:
             print(f"[ERROR] {psu['name']} psu data get fail：{e}")
