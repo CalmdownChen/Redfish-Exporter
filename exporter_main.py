@@ -135,6 +135,9 @@ cdu_calculated = Gauge("cdu_calculated_metric", "Calculated metrics from CDU", [
 # Global variable for total PSU power
 total_psu_power = 0.0
 
+# Track consecutive PSU and chassis status fetch failures to avoid immediately marking sensors as failed
+status_failures = {}
+
 def fetch_server_data():
     for server in servers:
         ip = server['ip_address']
@@ -217,8 +220,10 @@ def fetch_psu_data():
     global total_psu_power
     total_psu_power = 0.0
     for psu in psus:
+        base_url = f"https://{psu['ip_address']}/redfish/v1"
+        rack_name = psu.get("rack_name", "unknown")
+
         try:
-            base_url = f"https://{psu['ip_address']}/redfish/v1"
             response = requests.get(
                 f"{base_url}/Chassis/chassis/Sensors/chassis_output_power",
                 headers={'Accept': 'application/json'},
@@ -232,79 +237,98 @@ def fetch_psu_data():
                 value = response_data["Reading"]
                 if isinstance(value, (int, float)):
                     psu_power_output.labels(
-                        psu_name=psu["name"], rack_name=psu.get("rack_name", "unknown")
+                        psu_name=psu["name"], rack_name=rack_name
                     ).set(value)
                     total_psu_power += value
                     print(f"[OK] {psu['name']} = {value}W")
                 else:
                     psu_power_output.labels(
-                        psu_name=psu["name"], rack_name=psu.get("rack_name", "unknown")
+                        psu_name=psu["name"], rack_name=rack_name
                     ).set(0)
                     print(f"[WARN] {psu['name']} No value")
             else:
                 print(f"[WARN] {psu['name']} Sensor un-avaliable ")
+        except Exception as e:
+            print(f"[ERROR] {psu['name']} output power get fail：{e}")
 
-            for i in range(1, 13):
-                try:
-                    status_resp = requests.get(
-                        f"{base_url}/Chassis/chassis/Power/Oem/tsmc/PSU{i}",
-                        headers={'Accept': 'application/json'},
-                        auth=HTTPBasicAuth("root", "0penBmc"),
-                        verify=False,
-                        timeout=10,
-                    )
-                    status_data = status_resp.json()
-                    health = status_data.get('Status', {}).get('Health')
-                    metric_value = 0 if health == "OK" else 1
+        for i in range(1, 13):
+            sensor_key = ("psu", psu["name"], i)
+            try:
+                status_resp = requests.get(
+                    f"{base_url}/Chassis/chassis/Power/Oem/tsmc/PSU{i}",
+                    headers={'Accept': 'application/json'},
+                    auth=HTTPBasicAuth("root", "0penBmc"),
+                    verify=False,
+                    timeout=10,
+                )
+                status_data = status_resp.json()
+                health = status_data.get('Status', {}).get('Health')
+                metric_value = 0 if health == "OK" else 1
+                powershelf_psu_fail.labels(
+                    sensor_name=f"PSU_{i}",
+                    rack_name=rack_name,
+                ).set(metric_value)
+                if health == "OK":
+                    print(f"[OK] {psu['name']} PSU_{i} Health {health}")
+                else:
+                    print(f"[WARN] {psu['name']} PSU_{i} Health {health}")
+                status_failures[sensor_key] = 0
+            except Exception as e:
+                failure_count = status_failures.get(sensor_key, 0) + 1
+                status_failures[sensor_key] = failure_count
+                if failure_count >= 2:
                     powershelf_psu_fail.labels(
                         sensor_name=f"PSU_{i}",
-                        rack_name=psu.get("rack_name", "unknown"),
-                    ).set(metric_value)
-                    if health == "OK":
-                        print(f"[OK] {psu['name']} PSU_{i} Health {health}")
-                    else:
-                        print(f"[WARN] {psu['name']} PSU_{i} Health {health}")
-                except Exception as e:
-                    powershelf_psu_fail.labels(
-                        sensor_name=f"PSU_{i}",
-                        rack_name=psu.get("rack_name", "unknown"),
-                    ).set(1)
-                    print(f"[ERROR] {psu['name']} PSU_{i} status get fail：{e}")
-
-            for chassis_label, sensor_name in [
-                ("Chassis_A", "chassis_A_input_Voltage"),
-                ("Chassis_B", "chassis_B_input_Voltage"),
-            ]:
-                try:
-                    chassis_resp = requests.get(
-                        f"{base_url}/Chassis/chassis/Sensors/{sensor_name}",
-                        headers={'Accept': 'application/json'},
-                        auth=HTTPBasicAuth("root", "0penBmc"),
-                        verify=False,
-                        timeout=10,
-                    )
-                    chassis_data = chassis_resp.json()
-                    health = chassis_data.get("Status", {}).get("Health")
-                    metric_value = 0 if health == "OK" else 1
-                    powershelf_chassis_fail.labels(
-                        sensor_name=chassis_label,
-                        rack_name=psu.get("rack_name", "unknown"),
-                    ).set(metric_value)
-                    if health == "OK":
-                        print(f"[OK] {psu['name']} {chassis_label} Health {health}")
-                    else:
-                        print(f"[WARN] {psu['name']} {chassis_label} Health {health}")
-                except Exception as e:
-                    powershelf_chassis_fail.labels(
-                        sensor_name=chassis_label,
-                        rack_name=psu.get("rack_name", "unknown"),
+                        rack_name=rack_name,
                     ).set(1)
                     print(
-                        f"[ERROR] {psu['name']} {chassis_label} status get fail：{e}"
+                        f"[ERROR] {psu['name']} PSU_{i} status get fail (consecutive {failure_count})：{e}"
+                    )
+                else:
+                    print(
+                        f"[ERROR] {psu['name']} PSU_{i} status get fail：{e} (will retry)"
                     )
 
-        except Exception as e:
-            print(f"[ERROR] {psu['name']} psu data get fail：{e}")
+        for chassis_label, sensor_name in [
+            ("Chassis_A", "chassis_A_input_Voltage"),
+            ("Chassis_B", "chassis_B_input_Voltage"),
+        ]:
+            sensor_key = ("chassis", psu["name"], chassis_label)
+            try:
+                chassis_resp = requests.get(
+                    f"{base_url}/Chassis/chassis/Sensors/{sensor_name}",
+                    headers={'Accept': 'application/json'},
+                    auth=HTTPBasicAuth("root", "0penBmc"),
+                    verify=False,
+                    timeout=10,
+                )
+                chassis_data = chassis_resp.json()
+                health = chassis_data.get("Status", {}).get("Health")
+                metric_value = 0 if health == "OK" else 1
+                powershelf_chassis_fail.labels(
+                    sensor_name=chassis_label,
+                    rack_name=rack_name,
+                ).set(metric_value)
+                status_failures[sensor_key] = 0
+                if health == "OK":
+                    print(f"[OK] {psu['name']} {chassis_label} Health {health}")
+                else:
+                    print(f"[WARN] {psu['name']} {chassis_label} Health {health}")
+            except Exception as e:
+                failure_count = status_failures.get(sensor_key, 0) + 1
+                status_failures[sensor_key] = failure_count
+                if failure_count >= 2:
+                    powershelf_chassis_fail.labels(
+                        sensor_name=chassis_label,
+                        rack_name=rack_name,
+                    ).set(1)
+                    print(
+                        f"[ERROR] {psu['name']} {chassis_label} status get fail (consecutive {failure_count})：{e}"
+                    )
+                else:
+                    print(
+                        f"[ERROR] {psu['name']} {chassis_label} status get fail：{e} (will retry)"
+                    )
 def fetch_cdu_data():
     """Query CDU metrics for each configured CDU and expose them via Prometheus gauges."""
 
