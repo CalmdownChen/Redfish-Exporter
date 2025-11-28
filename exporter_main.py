@@ -187,11 +187,6 @@ def fetch_server_data():
             "Pwr_Mem_Total": server_mem_power,
         }
 
-        if "ASUS" in server['name']:
-            for gauge in power_metrics.values():
-                gauge.labels(server=ip, rack_name=rack_name).set(0)
-            continue
-
         for sensor, gauge in power_metrics.items():
             try:
                 r = requests.get(
