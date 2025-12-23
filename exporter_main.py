@@ -138,12 +138,44 @@ total_psu_power = 0.0
 # Track consecutive PSU and chassis status fetch failures to avoid immediately marking sensors as failed
 status_failures = {}
 
+
+def write_sensor_snapshot(nodes_data, psu_data, cdu_data):
+    """Persist the latest sensor readings to a JSON file without altering exporter behavior."""
+
+    snapshot = {
+        "nodes": nodes_data,
+        "Powershelf": psu_data,
+        "CDU": cdu_data,
+        "meta": {
+            "exporter_version": "",  # 預留未來寫入
+            "rack_id": "",  # 預留未來寫入
+        },
+    }
+
+    output_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sensors_snapshot.json")
+
+    try:
+        with open(output_path, "w", encoding="utf-8") as outfile:
+            json.dump(snapshot, outfile, ensure_ascii=False, indent=2)
+        print(f"[OK] Sensor snapshot written to {output_path}")
+    except Exception as exc:
+        print(f"[ERROR] Failed to write sensor snapshot: {exc}")
+
 def fetch_server_data():
+    nodes_data = {}
+
     for server in servers:
         ip = server['ip_address']
         rack_name = server.get('rack_name', 'unknown')
+        server_label = server.get('name', ip)
         base_url = f"https://{ip}/redfish/v1"
         auth = HTTPBasicAuth("admin", "password")
+
+        server_entry = {
+            "bmc_ip": ip,
+            "name": server_label,
+            "sensors": {},
+        }
 
         # Thermal sensor
         try:
@@ -157,6 +189,9 @@ def fetch_server_data():
                 sensor_name = item.get("Name", "Unknown")
                 value = item.get("ReadingCelsius")
                 state = item.get("Status", {}).get("State", "Unknown")
+                unit = item.get("ReadingUnits", "C")
+
+                server_entry["sensors"][sensor_name] = {"value": value, "unit": unit}
 
                 gauge = sensor_gauge_map.get(sensor_name)
                 if gauge:
@@ -200,6 +235,10 @@ def fetch_server_data():
                 data = r.json()
 
                 power = data.get("Reading")
+                unit = data.get("ReadingUnits", "W")
+
+                server_entry["sensors"][sensor] = {"value": power, "unit": unit}
+
                 if isinstance(power, (int, float)):
                     gauge.labels(server=ip, rack_name=rack_name).set(power)
                     print(f"[OK] {ip} {sensor} = {power}W")
@@ -209,14 +248,20 @@ def fetch_server_data():
             except Exception as e:
                 print(f"[ERROR] {ip} {sensor} API error: {e}")
 
+        nodes_data[server_label] = server_entry
+
+    return nodes_data
+
 
 
 def fetch_psu_data():
     global total_psu_power
     total_psu_power = 0.0
+    psu_data = {}
     for psu in psus:
         base_url = f"https://{psu['ip_address']}/redfish/v1"
         rack_name = psu.get("rack_name", "unknown")
+        psu_entry = {}
 
         try:
             response = requests.get(
@@ -230,6 +275,8 @@ def fetch_psu_data():
 
             if "Reading" in response_data:
                 value = response_data["Reading"]
+                unit = response_data.get("ReadingUnits", "W")
+                psu_entry["Output_Power"] = {"value": value, "unit": unit}
                 if isinstance(value, (int, float)):
                     psu_power_output.labels(
                         psu_name=psu["name"], rack_name=rack_name
@@ -259,6 +306,7 @@ def fetch_psu_data():
                 status_data = status_resp.json()
                 health = status_data.get('Status', {}).get('Health')
                 metric_value = 0 if health == "OK" else 1
+                psu_entry[f"PSU_{i}_Health"] = {"value": health, "unit": None}
                 powershelf_psu_fail.labels(
                     sensor_name=f"PSU_{i}",
                     rack_name=rack_name,
@@ -300,6 +348,7 @@ def fetch_psu_data():
                 chassis_data = chassis_resp.json()
                 health = chassis_data.get("Status", {}).get("Health")
                 metric_value = 0 if health == "OK" else 1
+                psu_entry[f"{chassis_label}_Health"] = {"value": health, "unit": None}
                 powershelf_chassis_fail.labels(
                     sensor_name=chassis_label,
                     rack_name=rack_name,
@@ -324,16 +373,30 @@ def fetch_psu_data():
                     print(
                         f"[ERROR] {psu['name']} {chassis_label} status get fail：{e} (will retry)"
                     )
+        psu_data[psu["name"]] = psu_entry
+    return psu_data
 def fetch_cdu_data():
     """Query CDU metrics for each configured CDU and expose them via Prometheus gauges."""
 
     global total_psu_power
+
+    cdu_data = {}
 
     for cdu in cdus:
         url = cdu.get("url")
         rack_name = cdu.get("rack_name", "unknown")
         if not url:
             continue
+
+        cdu_entry = {
+            "Temperature": {},
+            "Pump": {},
+            "Fan": {},
+            "Sensor": {},
+            "TankLevel": {},
+            "Leakage": {},
+            "Calculated": {},
+        }
 
         try:
             response = requests.get(url, timeout=10)
@@ -384,20 +447,24 @@ def fetch_cdu_data():
 
                     if label.startswith("T_") or label == "Ta":
                         cdu_temperature.labels(metric=label, rack_name=rack_name).set(val)
+                        cdu_entry["Temperature"][label] = {"value": val, "unit": "C"}
                     elif label.startswith("RPM_P") or label.startswith("POW_P") or label.startswith("PWM_P"):
                         cdu_pump.labels(metric=label, rack_name=rack_name).set(val)
+                        cdu_entry["Pump"][label] = {"value": val, "unit": None}
                         if label.startswith("RPM_P"):
                             pump_rpm[label.replace("RPM_P", "")] = val
                         elif label.startswith("PWM_P"):
                             pump_pwm[label.replace("PWM_P", "")] = val
                     elif label.startswith("RPM_F") or label.startswith("POW_F") or label.startswith("PWM_F"):
                         cdu_fan.labels(metric=label, rack_name=rack_name).set(val)
+                        cdu_entry["Fan"][label] = {"value": val, "unit": None}
                         if label.startswith("RPM_F"):
                             fan_rpm[label.replace("RPM_F", "")] = val
                         elif label.startswith("PWM_F"):
                             fan_pwm[label.replace("PWM_F", "")] = val
                     else:
                         cdu_sensor.labels(metric=label, rack_name=rack_name).set(val)
+                        cdu_entry["Sensor"][label] = {"value": val, "unit": None}
 
                     print(f"[OK] {rack_name} {label} = {val}")
 
@@ -411,6 +478,7 @@ def fetch_cdu_data():
                         sensor_name=sensor_name,
                         rack_name=f"keep-watching-{rack_name}",
                     ).set(0)
+                    cdu_entry["Leakage"][sensor_name] = {"value": value, "unit": None}
             elif leak_count == 1:
                 for sensor_name, value in leakage_values.items():
                     cdu_leakage.labels(sensor_name=sensor_name, rack_name=rack_name).set(0)
@@ -418,6 +486,7 @@ def fetch_cdu_data():
                         sensor_name=sensor_name,
                         rack_name=f"keep-watching-{rack_name}",
                     ).set(0 if value is None else value)
+                    cdu_entry["Leakage"][sensor_name] = {"value": value, "unit": None}
             else:
                 for sensor_name in leakage_values:
                     cdu_leakage.labels(sensor_name=sensor_name, rack_name=rack_name).set(0)
@@ -425,6 +494,7 @@ def fetch_cdu_data():
                         sensor_name=sensor_name,
                         rack_name=f"keep-watching-{rack_name}",
                     ).set(0)
+                    cdu_entry["Leakage"][sensor_name] = {"value": leakage_values.get(sensor_name), "unit": None}
 
             # Evaluate tank level conditions
             sensor_levh = tank_level_sensors.get("Sensor_LEVH")
@@ -447,12 +517,21 @@ def fetch_cdu_data():
                 critical_low
             )
 
+            cdu_entry["TankLevel"].update(
+                {
+                    "Level_Medium": {"value": level_medium, "unit": None},
+                    "Level_Low": {"value": level_low, "unit": None},
+                    "Critical_Low": {"value": critical_low, "unit": None},
+                }
+            )
+
             # Evaluate pump failure conditions
             for idx in set(pump_rpm) | set(pump_pwm):
                 rpm = pump_rpm.get(idx)
                 pwm = pump_pwm.get(idx)
                 fail = 1 if rpm is not None and pwm is not None and rpm < 100 and pwm != 0 else 0
                 cdu_pump_fail.labels(sensor_name=f"Pump_{idx}", rack_name=rack_name).set(fail)
+                cdu_entry["Pump"][f"Pump_{idx}_Fail"] = {"value": fail, "unit": None}
 
             # Evaluate fan failure conditions
             for idx in set(fan_rpm) | set(fan_pwm):
@@ -460,6 +539,7 @@ def fetch_cdu_data():
                 pwm = fan_pwm.get(idx)
                 fail = 1 if rpm is not None and pwm is not None and rpm < 100 and pwm != 0 else 0
                 cdu_fan_fail.labels(sensor_name=f"Fan_{idx}", rack_name=rack_name).set(fail)
+                cdu_entry["Fan"][f"Fan_{idx}_Fail"] = {"value": fail, "unit": None}
 
             # Calculate additional metrics if all required values are available
             if all(v is not None for v in (t_wi, t_wo)) and total_psu_power:
@@ -467,12 +547,14 @@ def fetch_cdu_data():
                 lpm_w_rounded = round(lpm_w, 2)
                 cdu_calculated.labels(metric="LPM_W").set(lpm_w_rounded)
                 print(f"[OK] {rack_name} LPM_W = {lpm_w_rounded:.2f}")
+                cdu_entry["Calculated"]["LPM_W"] = {"value": lpm_w_rounded, "unit": None}
 
             if all(v is not None for v in (t_cr, t_cco)) and total_psu_power:
                 lpm_c = total_psu_power / 69.7833 / (t_cr - t_cco)
                 lpm_c_rounded = round(lpm_c, 2)
                 cdu_calculated.labels(metric="LPM_C").set(lpm_c_rounded)
                 print(f"[OK] {rack_name} LPM_C = {lpm_c_rounded:.2f}")
+                cdu_entry["Calculated"]["LPM_C"] = {"value": lpm_c_rounded, "unit": None}
             else:
                 lpm_c = None
 
@@ -481,15 +563,21 @@ def fetch_cdu_data():
                 heat_cc_rounded = round(heat_cc, 2)
                 cdu_calculated.labels(metric="Heat_CC").set(heat_cc_rounded)
                 print(f"[OK] {rack_name} Heat_CC = {heat_cc_rounded:.2f}")
+                cdu_entry["Calculated"]["Heat_CC"] = {"value": heat_cc_rounded, "unit": None}
 
         except Exception as e:
             print(f"[ERROR] {rack_name} get data fail {e}")
+
+        cdu_data[rack_name] = cdu_entry
+
+    return cdu_data
 
 
 if __name__ == '__main__':
     start_http_server(5000, addr="0.0.0.0")  # Prometheus get data from it
     while True:
-        fetch_server_data()
-        fetch_psu_data()
-        fetch_cdu_data()
+        nodes_snapshot = fetch_server_data()
+        psu_snapshot = fetch_psu_data()
+        cdu_snapshot = fetch_cdu_data()
+        write_sensor_snapshot(nodes_snapshot, psu_snapshot, cdu_snapshot)
         time.sleep(15)  # update every 15 seconds
