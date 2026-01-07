@@ -381,6 +381,10 @@ def fetch_cdu_data():
     global total_psu_power
 
     cdu_data = {}
+    test_input_path = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        "cud_test_input_no_release.json",
+    )
 
     for cdu in cdus:
         url = cdu.get("url")
@@ -399,9 +403,14 @@ def fetch_cdu_data():
         }
 
         try:
-            response = requests.get(url, timeout=10)
-            response.raise_for_status()
-            src_data = response.json()
+            if os.path.exists(test_input_path):
+                with open(test_input_path, "r", encoding="utf-8") as infile:
+                    src_data = json.load(infile)
+                print(f"[INFO] {rack_name} using test input {test_input_path}")
+            else:
+                response = requests.get(url, timeout=10)
+                response.raise_for_status()
+                src_data = response.json()
 
             t_wi = t_wo = t_cco = t_cci = t_cr = None
             leakage_values = {
