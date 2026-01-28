@@ -4,6 +4,8 @@ import json
 import requests
 import subprocess
 import yaml
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from requests.auth import HTTPBasicAuth
 from prometheus_client import Gauge
 from prometheus_client import start_http_server
@@ -138,6 +140,34 @@ total_psu_power = 0.0
 # Track consecutive PSU and chassis status fetch failures to avoid immediately marking sensors as failed
 status_failures = {}
 
+_thread_local = threading.local()
+_server_executor = None
+_server_executor_lock = threading.Lock()
+
+
+def _init_worker_session():
+    _thread_local.session = requests.Session()
+
+
+def _get_session():
+    session = getattr(_thread_local, "session", None)
+    if session is None:
+        session = requests.Session()
+        _thread_local.session = session
+    return session
+
+
+def _get_server_executor():
+    global _server_executor
+    if _server_executor is None:
+        with _server_executor_lock:
+            if _server_executor is None:
+                _server_executor = ThreadPoolExecutor(
+                    max_workers=10,
+                    initializer=_init_worker_session,
+                )
+    return _server_executor
+
 
 def write_sensor_snapshot(nodes_data, psu_data, cdu_data):
     """Persist the latest sensor readings to a JSON file without altering exporter behavior."""
@@ -161,93 +191,110 @@ def write_sensor_snapshot(nodes_data, psu_data, cdu_data):
     except Exception as exc:
         print(f"[ERROR] Failed to write sensor snapshot: {exc}")
 
-def fetch_server_data():
-    nodes_data = {}
 
-    for server in servers:
-        ip = server['ip_address']
-        rack_name = server.get('rack_name', 'unknown')
-        server_label = server.get('name', ip)
-        base_url = f"https://{ip}/redfish/v1"
-        auth = HTTPBasicAuth("admin", "password")
+def _fetch_single_server(server):
+    logs = []
+    session = _get_session()
+    ip = server['ip_address']
+    rack_name = server.get('rack_name', 'unknown')
+    server_label = server.get('name', ip)
+    base_url = f"https://{ip}/redfish/v1"
+    auth = HTTPBasicAuth("admin", "password")
 
-        server_entry = {
-            "bmc_ip": ip,
-            "name": server_label,
-            "sensors": {},
-        }
+    server_entry = {
+        "bmc_ip": ip,
+        "name": server_label,
+        "sensors": {},
+    }
 
-        # Thermal sensor
+    # Thermal sensor
+    try:
+        r = session.get(
+            f"{base_url}/Chassis/Self/Thermal",
+            headers={"Accept": "application/json"},
+            auth=auth,
+            verify=False,
+            timeout=15,
+        )
+        r.raise_for_status()
+        data = r.json()
+
+        for item in data.get("Temperatures", []):
+            sensor_name = item.get("Name", "Unknown")
+            value = item.get("ReadingCelsius")
+            state = item.get("Status", {}).get("State", "Unknown")
+            unit = item.get("ReadingUnits", "C")
+
+            server_entry["sensors"][sensor_name] = {"value": value, "unit": unit}
+
+            gauge = sensor_gauge_map.get(sensor_name)
+            if gauge:
+                if isinstance(value, (int, float)):
+                    gauge.labels(
+                        server_name=ip,
+                        sensor_name=sensor_name,
+                        rack_name=rack_name,
+                    ).set(value)
+                    logs.append(f"[OK] {ip} {sensor_name} = {value}°C")
+                else:
+                    gauge.labels(
+                        server_name=ip,
+                        sensor_name=sensor_name,
+                        rack_name=rack_name,
+                    ).set(0)
+                    logs.append(f"[SKIP] {ip} {sensor_name}: No Value ,state: {state}")
+
+    except Exception as e:
+        logs.append(f"[ERROR] {ip} Thermal API error: {e}")
+
+    # Server power metrics
+    power_metrics = {
+        "Pwr_Node_Total": server_power,
+        "Pwr_Fan_Total": server_fan_power,
+        "Pwr_CPU_Total": server_cpu_power,
+        "Pwr_GPU_Total": server_gpu_power,
+        "Pwr_Mem_Total": server_mem_power,
+    }
+
+    for sensor, gauge in power_metrics.items():
         try:
-            r = requests.get(f"{base_url}/Chassis/Self/Thermal",
-                             headers={"Accept": "application/json"},
-                             auth=auth, verify=False, timeout=15)
+            r = session.get(
+                f"{base_url}/Chassis/Self/Sensors/{sensor}",
+                headers={"Accept": "application/json"},
+                auth=auth,
+                verify=False,
+                timeout=15,
+            )
             r.raise_for_status()
             data = r.json()
 
-            for item in data.get("Temperatures", []):
-                sensor_name = item.get("Name", "Unknown")
-                value = item.get("ReadingCelsius")
-                state = item.get("Status", {}).get("State", "Unknown")
-                unit = item.get("ReadingUnits", "C")
+            power = data.get("Reading")
+            unit = data.get("ReadingUnits", "W")
 
-                server_entry["sensors"][sensor_name] = {"value": value, "unit": unit}
+            server_entry["sensors"][sensor] = {"value": power, "unit": unit}
 
-                gauge = sensor_gauge_map.get(sensor_name)
-                if gauge:
-                    if isinstance(value, (int, float)):
-                        gauge.labels(
-                            server_name=ip,
-                            sensor_name=sensor_name,
-                            rack_name=rack_name,
-                        ).set(value)
-                        print(f"[OK] {ip} {sensor_name} = {value}°C")
-                    else:
-                        gauge.labels(
-                            server_name=ip,
-                            sensor_name=sensor_name,
-                            rack_name=rack_name,
-                        ).set(0)
-                        print(f"[SKIP] {ip} {sensor_name}: No Value ,state: {state}")
-
+            if isinstance(power, (int, float)):
+                gauge.labels(server=ip, rack_name=rack_name).set(power)
+                logs.append(f"[OK] {ip} {sensor} = {power}W")
+            else:
+                gauge.labels(server=ip, rack_name=rack_name).set(0)
+                logs.append(f"[SKIP] {ip} {sensor} invalid value")
         except Exception as e:
-            print(f"[ERROR] {ip} Thermal API error: {e}")
+            logs.append(f"[ERROR] {ip} {sensor} API error: {e}")
 
-        # Server power metrics
-        power_metrics = {
-            "Pwr_Node_Total": server_power,
-            "Pwr_Fan_Total": server_fan_power,
-            "Pwr_CPU_Total": server_cpu_power,
-            "Pwr_GPU_Total": server_gpu_power,
-            "Pwr_Mem_Total": server_mem_power,
-        }
+    return server_label, server_entry, logs
 
-        for sensor, gauge in power_metrics.items():
-            try:
-                r = requests.get(
-                    f"{base_url}/Chassis/Self/Sensors/{sensor}",
-                    headers={"Accept": "application/json"},
-                    auth=auth,
-                    verify=False,
-                    timeout=15,
-                )
-                r.raise_for_status()
-                data = r.json()
+def fetch_server_data():
+    nodes_data = {}
+    if not servers:
+        return nodes_data
 
-                power = data.get("Reading")
-                unit = data.get("ReadingUnits", "W")
+    executor = _get_server_executor()
+    results = list(executor.map(_fetch_single_server, servers))
 
-                server_entry["sensors"][sensor] = {"value": power, "unit": unit}
-
-                if isinstance(power, (int, float)):
-                    gauge.labels(server=ip, rack_name=rack_name).set(power)
-                    print(f"[OK] {ip} {sensor} = {power}W")
-                else:
-                    gauge.labels(server=ip, rack_name=rack_name).set(0)
-                    print(f"[SKIP] {ip} {sensor} invalid value")
-            except Exception as e:
-                print(f"[ERROR] {ip} {sensor} API error: {e}")
-
+    for server_label, server_entry, logs in results:
+        for message in logs:
+            print(message)
         nodes_data[server_label] = server_entry
 
     return nodes_data
