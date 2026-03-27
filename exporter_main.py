@@ -206,6 +206,7 @@ def _fetch_single_server(server):
         "name": server_label,
         "sensors": {},
     }
+    thermal_sensor_names = list(sensor_gauge_map.keys())
 
     # Thermal sensor
     try:
@@ -245,6 +246,15 @@ def _fetch_single_server(server):
                     logs.append(f"[SKIP] {ip} {sensor_name}: No Value ,state: {state}")
 
     except Exception as e:
+        for sensor_name in thermal_sensor_names:
+            gauge = sensor_gauge_map.get(sensor_name)
+            if gauge:
+                gauge.labels(
+                    server_name=ip,
+                    sensor_name=sensor_name,
+                    rack_name=rack_name,
+                ).set(-1)
+            server_entry["sensors"][sensor_name] = {"value": -1, "unit": "C"}
         logs.append(f"[ERROR] {ip} Thermal API error: {e}")
 
     # Server power metrics
@@ -280,6 +290,8 @@ def _fetch_single_server(server):
                 gauge.labels(server=ip, rack_name=rack_name).set(0)
                 logs.append(f"[SKIP] {ip} {sensor} invalid value")
         except Exception as e:
+            gauge.labels(server=ip, rack_name=rack_name).set(-1)
+            server_entry["sensors"][sensor] = {"value": -1, "unit": "W"}
             logs.append(f"[ERROR] {ip} {sensor} API error: {e}")
 
     return server_label, server_entry, logs
