@@ -1,6 +1,7 @@
 import os
 import time
 import json
+import ipaddress
 import requests
 import subprocess
 import yaml
@@ -23,8 +24,99 @@ def load_config():
         config = yaml.safe_load(file)
     return config
 
+def _expand_ip_token(token):
+    token = token.strip()
+    if not token:
+        return []
+
+    if "-" in token:
+        start_str, end_str = token.split("-", 1)
+        start = int(start_str.strip())
+        end = int(end_str.strip())
+        if start > end:
+            raise ValueError(f"Invalid IP range: {token}")
+        return list(range(start, end + 1))
+
+    return [int(token)]
+
+
+def expand_ip_address_spec(ip_spec):
+    """Expand IP definition into a list.
+
+    Supported formats:
+    - 192.168.1.10
+    - 192.168.1.[1-10]
+    - 192.168.1.[1-5, 8, 10-12]
+    """
+    if not isinstance(ip_spec, str):
+        raise ValueError(f"ip_address must be string, got: {type(ip_spec)}")
+
+    ip_spec = ip_spec.strip()
+    if "[" not in ip_spec:
+        ipaddress.ip_address(ip_spec)
+        return [ip_spec]
+
+    if ip_spec.count("[") != 1 or ip_spec.count("]") != 1:
+        raise ValueError(f"Invalid IP expression: {ip_spec}")
+
+    prefix, rest = ip_spec.split("[", 1)
+    range_part, suffix = rest.split("]", 1)
+    if suffix.strip():
+        raise ValueError(f"Invalid IP expression suffix: {ip_spec}")
+
+    prefix = prefix.strip().rstrip(".")
+    octets = prefix.split(".")
+    if len(octets) != 3:
+        raise ValueError(f"Only last-octet ranges are supported: {ip_spec}")
+
+    values = []
+    for token in range_part.split(","):
+        values.extend(_expand_ip_token(token))
+
+    expanded_ips = []
+    for val in values:
+        if val < 0 or val > 255:
+            raise ValueError(f"IP last octet out of range: {val}")
+        ip = f"{prefix}.{val}"
+        ipaddress.ip_address(ip)
+        expanded_ips.append(ip)
+
+    return expanded_ips
+
+
+def build_server_list(config_servers):
+    expanded_servers = []
+
+    for server in config_servers:
+        ip_spec = server.get("ip_address")
+        if not ip_spec:
+            continue
+
+        ip_list = expand_ip_address_spec(ip_spec)
+        multiple_ips = len(ip_list) > 1
+
+        for ip in ip_list:
+            entry = dict(server)
+            entry["ip_address"] = ip
+
+            if multiple_ips:
+                last_octet = ip.split(".")[-1]
+
+                if entry.get("name"):
+                    entry["name"] = f"{entry['name']}_{last_octet}"
+                else:
+                    entry["name"] = f"Node_{last_octet}"
+
+                if entry.get("location"):
+                    entry["location"] = f"{entry['location']}_{last_octet}"
+
+            expanded_servers.append(entry)
+
+    return expanded_servers
+
+
 config = load_config()
-servers = config.get("servers", [])
+servers = build_server_list(config.get("servers", []))
 psus = config.get("psus", [])
 cdus = config.get("cdu", [])
 
