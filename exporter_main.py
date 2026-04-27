@@ -223,12 +223,6 @@ cdu_fan_fail = Gauge(
     ["sensor_name", "rack_name"],
 )
 
-# Calculated CDU metrics
-cdu_calculated = Gauge("cdu_calculated_metric", "Calculated metrics from CDU", ["metric"])
-
-# Global variable for total PSU power
-total_psu_power = 0.0
-
 # Track consecutive PSU and chassis status fetch failures to avoid immediately marking sensors as failed
 status_failures = {}
 
@@ -394,8 +388,6 @@ def fetch_server_data():
 
 
 def fetch_psu_data():
-    global total_psu_power
-    total_psu_power = 0.0
     psu_data = {}
     for psu in psus:
         base_url = f"https://{psu['ip_address']}/redfish/v1"
@@ -420,7 +412,6 @@ def fetch_psu_data():
                     psu_power_output.labels(
                         psu_name=psu["name"], rack_name=rack_name
                     ).set(value)
-                    total_psu_power += value
                     print(f"[OK] {psu['name']} = {value}W")
                 else:
                     psu_power_output.labels(
@@ -517,8 +508,6 @@ def fetch_psu_data():
 def fetch_cdu_data():
     """Query CDU metrics for each configured CDU and expose them via Prometheus gauges."""
 
-    global total_psu_power
-
     cdu_data = {}
 
     for cdu in cdus:
@@ -534,7 +523,6 @@ def fetch_cdu_data():
             "Sensor": {},
             "TankLevel": {},
             "Leakage": {},
-            "Calculated": {},
         }
 
         try:
@@ -542,7 +530,6 @@ def fetch_cdu_data():
             response.raise_for_status()
             src_data = response.json()
 
-            t_wi = t_wo = t_cco = t_cci = t_cr = None
             leakage_values = {
                 "Sensor_L1": None,
                 "Sensor_L2": None,
@@ -572,17 +559,6 @@ def fetch_cdu_data():
                         leakage_values[label] = val
                     if label in tank_level_sensors:
                         tank_level_sensors[label] = val
-
-                    if label == "T_WI":
-                        t_wi = val
-                    elif label == "T_WO":
-                        t_wo = val
-                    elif label == "T_CCO":
-                        t_cco = val
-                    elif label == "T_CCI":
-                        t_cci = val
-                    elif label == "T_CR":
-                        t_cr = val
 
                     if label.startswith("T_") or label == "Ta":
                         cdu_temperature.labels(metric=label, rack_name=rack_name).set(val)
@@ -679,30 +655,6 @@ def fetch_cdu_data():
                 fail = 1 if rpm is not None and pwm is not None and rpm < 100 and pwm != 0 else 0
                 cdu_fan_fail.labels(sensor_name=f"Fan_{idx}", rack_name=rack_name).set(fail)
                 cdu_entry["Fan"][f"Fan_{idx}_Fail"] = {"value": fail, "unit": None}
-
-            # Calculate additional metrics if all required values are available
-            if all(v is not None for v in (t_wi, t_wo)) and total_psu_power:
-                lpm_w = (total_psu_power / 0.97) / 69.7833 / (t_wo - t_wi)
-                lpm_w_rounded = round(lpm_w, 2)
-                cdu_calculated.labels(metric="LPM_W").set(lpm_w_rounded)
-                print(f"[OK] {rack_name} LPM_W = {lpm_w_rounded:.2f}")
-                cdu_entry["Calculated"]["LPM_W"] = {"value": lpm_w_rounded, "unit": None}
-
-            if all(v is not None for v in (t_cr, t_cco)) and total_psu_power:
-                lpm_c = total_psu_power / 69.7833 / (t_cr - t_cco)
-                lpm_c_rounded = round(lpm_c, 2)
-                cdu_calculated.labels(metric="LPM_C").set(lpm_c_rounded)
-                print(f"[OK] {rack_name} LPM_C = {lpm_c_rounded:.2f}")
-                cdu_entry["Calculated"]["LPM_C"] = {"value": lpm_c_rounded, "unit": None}
-            else:
-                lpm_c = None
-
-            if lpm_c is not None and t_cco is not None and t_cci is not None:
-                heat_cc = lpm_c * (t_cco - t_cci) * 69.7833
-                heat_cc_rounded = round(heat_cc, 2)
-                cdu_calculated.labels(metric="Heat_CC").set(heat_cc_rounded)
-                print(f"[OK] {rack_name} Heat_CC = {heat_cc_rounded:.2f}")
-                cdu_entry["Calculated"]["Heat_CC"] = {"value": heat_cc_rounded, "unit": None}
 
         except Exception as e:
             print(f"[ERROR] {rack_name} get data fail {e}")
