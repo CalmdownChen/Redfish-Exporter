@@ -212,6 +212,11 @@ cdu_leakage = Gauge(
     "Leakage sensor readings from CDU",
     ["sensor_name", "rack_name"],
 )
+server_leakage = Gauge(
+    "server_leakage",
+    "Server leakage sensor status (0: normal, 1: leakage)",
+    ["sensor_name", "rack_name"],
+)
 cdu_pump_fail = Gauge(
     "cdu_pump_fail",
     "CDU pump failure status (1: fail, 0: ok)",
@@ -232,9 +237,23 @@ total_psu_power = 0.0
 # Track consecutive PSU and chassis status fetch failures to avoid immediately marking sensors as failed
 status_failures = {}
 
+SERVER_POLL_INTERVAL_SECONDS = 60
+SERVER_LEAKAGE_POLL_INTERVAL_SECONDS = 10
+SERVER_LEAKAGE_TIMEOUT_SECONDS = 3
+SERVER_LEAKAGE_SENSORS = [
+    "Chassis_Leakage",
+    "Node_Leakage",
+    "GPU_Node_Leakage",
+]
+
+server_leakage_state = {}
+server_leakage_lock = threading.Lock()
+
 _thread_local = threading.local()
 _server_executor = None
 _server_executor_lock = threading.Lock()
+_server_leakage_executor = None
+_server_leakage_executor_lock = threading.Lock()
 
 
 def _init_worker_session():
@@ -259,6 +278,18 @@ def _get_server_executor():
                     initializer=_init_worker_session,
                 )
     return _server_executor
+
+
+def _get_server_leakage_executor():
+    global _server_leakage_executor
+    if _server_leakage_executor is None:
+        with _server_leakage_executor_lock:
+            if _server_leakage_executor is None:
+                _server_leakage_executor = ThreadPoolExecutor(
+                    max_workers=max(1, len(servers)),
+                    initializer=_init_worker_session,
+                )
+    return _server_leakage_executor
 
 
 def write_sensor_snapshot(nodes_data, psu_data, cdu_data):
@@ -390,6 +421,83 @@ def fetch_server_data():
         nodes_data[server_label] = server_entry
 
     return nodes_data
+
+
+def _fetch_single_server_leakage(server):
+    logs = []
+    readings = []
+    session = _get_session()
+    ip = server["ip_address"]
+    rack_name = server.get("rack_name", "unknown")
+    base_url = f"https://{ip}/redfish/v1"
+    auth = HTTPBasicAuth("admin", "password")
+
+    for sensor_name in SERVER_LEAKAGE_SENSORS:
+        try:
+            response = session.get(
+                f"{base_url}/Chassis/Self/Sensors/{sensor_name}",
+                headers={"Accept": "application/json"},
+                auth=auth,
+                verify=False,
+                timeout=SERVER_LEAKAGE_TIMEOUT_SECONDS,
+            )
+            response.raise_for_status()
+            data = response.json()
+            value = data.get("Reading")
+
+            if value in (0, 1):
+                readings.append((rack_name, sensor_name, value))
+                logs.append(f"[OK] {ip} {sensor_name} leakage = {value}")
+            else:
+                logs.append(f"[SKIP] {ip} {sensor_name} invalid leakage value")
+        except Exception as e:
+            logs.append(f"[ERROR] {ip} {sensor_name} leakage API error: {e}")
+
+    return readings, logs
+
+
+def fetch_server_leakage_data():
+    if not servers:
+        return
+
+    executor = _get_server_leakage_executor()
+    results = list(executor.map(_fetch_single_server_leakage, servers))
+    successful_readings = {}
+
+    for readings, logs in results:
+        for message in logs:
+            print(message)
+
+        for rack_name, sensor_name, value in readings:
+            successful_readings.setdefault((rack_name, sensor_name), []).append(value)
+
+    with server_leakage_lock:
+        for key, values in successful_readings.items():
+            rack_name, sensor_name = key
+            metric_value = 1 if any(value == 1 for value in values) else 0
+            server_leakage_state[key] = metric_value
+            server_leakage.labels(
+                sensor_name=sensor_name,
+                rack_name=rack_name,
+            ).set(metric_value)
+
+        for key, metric_value in server_leakage_state.items():
+            if key in successful_readings:
+                continue
+            rack_name, sensor_name = key
+            server_leakage.labels(
+                sensor_name=sensor_name,
+                rack_name=rack_name,
+            ).set(metric_value)
+            print(
+                f"[KEEP] {rack_name} {sensor_name} leakage keeps last value {metric_value}"
+            )
+
+
+def poll_server_leakage_forever():
+    while True:
+        fetch_server_leakage_data()
+        time.sleep(SERVER_LEAKAGE_POLL_INTERVAL_SECONDS)
 
 
 
@@ -714,9 +822,12 @@ def fetch_cdu_data():
 
 if __name__ == '__main__':
     start_http_server(5000, addr="0.0.0.0")  # Prometheus get data from it
+    leakage_thread = threading.Thread(target=poll_server_leakage_forever, daemon=True)
+    leakage_thread.start()
+
     while True:
         nodes_snapshot = fetch_server_data()
         psu_snapshot = fetch_psu_data()
         cdu_snapshot = fetch_cdu_data()
         write_sensor_snapshot(nodes_snapshot, psu_snapshot, cdu_snapshot)
-        time.sleep(15)  # update every 15 seconds
+        time.sleep(SERVER_POLL_INTERVAL_SECONDS)
