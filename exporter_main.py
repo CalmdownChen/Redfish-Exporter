@@ -155,6 +155,11 @@ sensor_gauge_map = {
 server_power = Gauge(
     "server_power_watt", "Total power reading", ["server", "rack_name"]
 )
+server_power_status = Gauge(
+    "server_power_status",
+    "Server power state from Redfish (1: On, 0: not On, -1: API failure)",
+    ["server", "rack_name"],
+)
 server_fan_power = Gauge(
     "server_fan_power_watt", "Total fan power reading", ["server", "rack_name"]
 )
@@ -298,6 +303,27 @@ def _fetch_single_server(server):
         "name": server_label,
         "sensors": {},
     }
+
+    # Server power state is the coarse API health signal for Grafana filtering.
+    try:
+        r = session.get(
+            f"{base_url}/Systems/Self",
+            headers={"Accept": "application/json"},
+            auth=auth,
+            verify=False,
+            timeout=15,
+        )
+        r.raise_for_status()
+        data = r.json()
+        power_state = data.get("PowerState")
+        power_status = 1 if power_state == "On" else 0
+        server_power_status.labels(server=ip, rack_name=rack_name).set(power_status)
+        server_entry["power_state"] = {"value": power_state, "status": power_status}
+        logs.append(f"[OK] {ip} PowerState = {power_state}")
+    except Exception as e:
+        server_power_status.labels(server=ip, rack_name=rack_name).set(-1)
+        server_entry["power_state"] = {"value": None, "status": -1}
+        logs.append(f"[ERROR] {ip} PowerState API error: {e}")
 
     # Thermal sensor
     try:
