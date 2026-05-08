@@ -220,7 +220,7 @@ cdu_leakage = Gauge(
 server_leakage = Gauge(
     "server_leakage",
     "Server leakage sensor status (0: normal, 1: leakage)",
-    ["sensor_name", "rack_name"],
+    ["server", "sensor_name", "rack_name"],
 )
 cdu_pump_fail = Gauge(
     "cdu_pump_fail",
@@ -472,7 +472,7 @@ def _fetch_single_server_leakage(server):
             value = data.get("Reading")
 
             if value in (0, 1):
-                readings.append((rack_name, sensor_name, value))
+                readings.append((ip, rack_name, sensor_name, value))
                 logs.append(f"[OK] {ip} {sensor_name} leakage = {value}")
             else:
                 logs.append(f"[SKIP] {ip} {sensor_name} invalid leakage value")
@@ -494,15 +494,15 @@ def fetch_server_leakage_data():
         for message in logs:
             print(message)
 
-        for rack_name, sensor_name, value in readings:
-            successful_readings.setdefault((rack_name, sensor_name), []).append(value)
+        for server, rack_name, sensor_name, value in readings:
+            successful_readings[(server, rack_name, sensor_name)] = value
 
     with server_leakage_lock:
-        for key, values in successful_readings.items():
-            rack_name, sensor_name = key
-            metric_value = 1 if any(value == 1 for value in values) else 0
+        for key, metric_value in successful_readings.items():
+            server, rack_name, sensor_name = key
             server_leakage_state[key] = metric_value
             server_leakage.labels(
+                server=server,
                 sensor_name=sensor_name,
                 rack_name=rack_name,
             ).set(metric_value)
@@ -510,13 +510,14 @@ def fetch_server_leakage_data():
         for key, metric_value in server_leakage_state.items():
             if key in successful_readings:
                 continue
-            rack_name, sensor_name = key
+            server, rack_name, sensor_name = key
             server_leakage.labels(
+                server=server,
                 sensor_name=sensor_name,
                 rack_name=rack_name,
             ).set(metric_value)
             print(
-                f"[KEEP] {rack_name} {sensor_name} leakage keeps last value {metric_value}"
+                f"[KEEP] {server} {rack_name} {sensor_name} leakage keeps last value {metric_value}"
             )
 
 
