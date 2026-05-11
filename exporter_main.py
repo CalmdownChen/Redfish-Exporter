@@ -291,7 +291,7 @@ def _get_server_leakage_executor():
         with _server_leakage_executor_lock:
             if _server_leakage_executor is None:
                 _server_leakage_executor = ThreadPoolExecutor(
-                    max_workers=max(1, len(servers)),
+                    max_workers=10,
                     initializer=_init_worker_session,
                 )
     return _server_leakage_executor
