@@ -153,24 +153,24 @@ sensor_gauge_map = {
 
 # Prometheus metrics
 server_power = Gauge(
-    "server_power_watt", "Total power reading", ["server", "rack_name"]
+    "server_power_watt", "Total power reading", ["server_name", "rack_name"]
 )
 server_power_status = Gauge(
     "server_power_status",
     "Server power state from Redfish (1: On, 0: not On, -1: API failure)",
-    ["server", "rack_name"],
+    ["server_name", "rack_name"],
 )
 server_fan_power = Gauge(
-    "server_fan_power_watt", "Total fan power reading", ["server", "rack_name"]
+    "server_fan_power_watt", "Total fan power reading", ["server_name", "rack_name"]
 )
 server_cpu_power = Gauge(
-    "server_cpu_power_watt", "Total CPU power reading", ["server", "rack_name"]
+    "server_cpu_power_watt", "Total CPU power reading", ["server_name", "rack_name"]
 )
 server_gpu_power = Gauge(
-    "server_gpu_power_watt", "Total GPU power reading", ["server", "rack_name"]
+    "server_gpu_power_watt", "Total GPU power reading", ["server_name", "rack_name"]
 )
 server_mem_power = Gauge(
-    "server_mem_power_watt", "Total memory power reading", ["server", "rack_name"]
+    "server_mem_power_watt", "Total memory power reading", ["server_name", "rack_name"]
 )
 psu_power_output = Gauge(
     "psu_output_power_watt",
@@ -220,7 +220,7 @@ cdu_leakage = Gauge(
 server_leakage = Gauge(
     "server_leakage",
     "Server leakage sensor status (0: normal, 1: leakage)",
-    ["server", "sensor_name", "rack_name"],
+    ["server_name", "sensor_name", "rack_name"],
 )
 cdu_pump_fail = Gauge(
     "cdu_pump_fail",
@@ -285,7 +285,7 @@ def _get_server_leakage_executor():
         with _server_leakage_executor_lock:
             if _server_leakage_executor is None:
                 _server_leakage_executor = ThreadPoolExecutor(
-                    max_workers=max(1, len(servers)),
+                    max_workers=10,
                     initializer=_init_worker_session,
                 )
     return _server_leakage_executor
@@ -342,11 +342,11 @@ def _fetch_single_server(server):
         data = r.json()
         power_state = data.get("PowerState")
         power_status = 1 if power_state == "On" else 0
-        server_power_status.labels(server=ip, rack_name=rack_name).set(power_status)
+        server_power_status.labels(server_name=ip, rack_name=rack_name).set(power_status)
         server_entry["power_state"] = {"value": power_state, "status": power_status}
         logs.append(f"[OK] {ip} PowerState = {power_state}")
     except Exception as e:
-        server_power_status.labels(server=ip, rack_name=rack_name).set(-1)
+        server_power_status.labels(server_name=ip, rack_name=rack_name).set(-1)
         server_entry["power_state"] = {"value": None, "status": -1}
         logs.append(f"[ERROR] {ip} PowerState API error: {e}")
 
@@ -417,10 +417,10 @@ def _fetch_single_server(server):
             server_entry["sensors"][sensor] = {"value": power, "unit": unit}
 
             if isinstance(power, (int, float)):
-                gauge.labels(server=ip, rack_name=rack_name).set(power)
+                gauge.labels(server_name=ip, rack_name=rack_name).set(power)
                 logs.append(f"[OK] {ip} {sensor} = {power}W")
             else:
-                gauge.labels(server=ip, rack_name=rack_name).set(0)
+                gauge.labels(server_name=ip, rack_name=rack_name).set(0)
                 logs.append(f"[SKIP] {ip} {sensor} invalid value")
         except Exception as e:
             logs.append(f"[ERROR] {ip} {sensor} API error: {e}")
@@ -496,7 +496,7 @@ def fetch_server_leakage_data():
             server, rack_name, sensor_name = key
             server_leakage_state[key] = metric_value
             server_leakage.labels(
-                server=server,
+                server_name=server,
                 sensor_name=sensor_name,
                 rack_name=rack_name,
             ).set(metric_value)
@@ -506,7 +506,7 @@ def fetch_server_leakage_data():
                 continue
             server, rack_name, sensor_name = key
             server_leakage.labels(
-                server=server,
+                server_name=server,
                 sensor_name=sensor_name,
                 rack_name=rack_name,
             ).set(metric_value)
