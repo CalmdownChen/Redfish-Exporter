@@ -172,6 +172,11 @@ server_gpu_power = Gauge(
 server_mem_power = Gauge(
     "server_mem_power_watt", "Total memory power reading", ["server_name", "rack_name"]
 )
+server_chassis_location = Gauge(
+    "server_chassis_location",
+    "Chassis location reading from Redfish",
+    ["server_name", "rack_name"],
+)
 psu_power_output = Gauge(
     "psu_output_power_watt",
     "Output power reading from PSU",
@@ -391,15 +396,16 @@ def _fetch_single_server(server):
         logs.append(f"[ERROR] {ip} Thermal API error: {e}")
 
     # Server power metrics
-    power_metrics = {
-        "Pwr_Node_Total": server_power,
-        "Pwr_Fan_Total": server_fan_power,
-        "Pwr_CPU_Total": server_cpu_power,
-        "Pwr_GPU_Total": server_gpu_power,
-        "Pwr_Mem_Total": server_mem_power,
+    reading_metrics = {
+        "Pwr_Node_Total": (server_power, "W"),
+        "Pwr_Fan_Total": (server_fan_power, "W"),
+        "Pwr_CPU_Total": (server_cpu_power, "W"),
+        "Pwr_GPU_Total": (server_gpu_power, "W"),
+        "Pwr_Mem_Total": (server_mem_power, "W"),
+        "Chassis_Location": (server_chassis_location, ""),
     }
 
-    for sensor, gauge in power_metrics.items():
+    for sensor, (gauge, default_unit) in reading_metrics.items():
         try:
             r = session.get(
                 f"{base_url}/Chassis/Self/Sensors/{sensor}",
@@ -411,14 +417,14 @@ def _fetch_single_server(server):
             r.raise_for_status()
             data = r.json()
 
-            power = data.get("Reading")
-            unit = data.get("ReadingUnits", "W")
+            reading = data.get("Reading")
+            unit = data.get("ReadingUnits", default_unit)
 
-            server_entry["sensors"][sensor] = {"value": power, "unit": unit}
+            server_entry["sensors"][sensor] = {"value": reading, "unit": unit}
 
-            if isinstance(power, (int, float)):
-                gauge.labels(server_name=ip, rack_name=rack_name).set(power)
-                logs.append(f"[OK] {ip} {sensor} = {power}W")
+            if isinstance(reading, (int, float)):
+                gauge.labels(server_name=ip, rack_name=rack_name).set(reading)
+                logs.append(f"[OK] {ip} {sensor} = {reading}{unit}")
             else:
                 gauge.labels(server_name=ip, rack_name=rack_name).set(0)
                 logs.append(f"[SKIP] {ip} {sensor} invalid value")
