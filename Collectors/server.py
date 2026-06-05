@@ -95,7 +95,6 @@ class ServerCollector(BaseCollector):
         async with semaphore:
             try:
                 await self.collect_thermal(client, server)
-                await self.collect_node_power(client, server)
                 await self.collect_fan_power(client, server)
                 await self.collect_cpu_power(client, server)
                 await self.collect_gpu_power(client, server)
