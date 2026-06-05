@@ -89,16 +89,19 @@ class ServerCollector(BaseCollector):
             "Pwr_Mem_Total": self.metrics_dict["server_mem_power_watt"],
         }
 
-    async def collect_metrics(self, client: httpx.AsyncClient, server, _seq):
-        try:
-            await self.collect_thermal(client, server)
-            await self.collect_node_power(client, server)
-            await self.collect_fan_power(client, server)
-            await self.collect_cpu_power(client, server)
-            await self.collect_gpu_power(client, server)
-            await self.collect_dimm_power(client, server)
-        except Exception as e:
-            logger.error(f"{server['location']}: {e}")
+    async def collect_metrics(
+        self, client: httpx.AsyncClient, semaphore, server, _seq
+    ):
+        async with semaphore:
+            try:
+                await self.collect_thermal(client, server)
+                await self.collect_node_power(client, server)
+                await self.collect_fan_power(client, server)
+                await self.collect_cpu_power(client, server)
+                await self.collect_gpu_power(client, server)
+                await self.collect_dimm_power(client, server)
+            except Exception as e:
+                logger.error(f"{server['location']}: {e}")
 
     # def collect_power_state(self, session, server):
     #     url = f"https://{server['ip']}/redfish/v1/Systems/Self"
