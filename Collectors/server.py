@@ -81,7 +81,7 @@ class ServerCollector(BaseCollector):
             "Temp_GPU_3": self.metrics_dict["server_gpu_temperature_celsius"],
             "Temp_GPU_4": self.metrics_dict["server_gpu_temperature_celsius"],
         }
-        self_power_gauge_map = {
+        self.power_gauge_map = {
             "Pwr_Node_Total": self.metrics_dict["server_power_watt"],
             "Pwr_Fan_Total": self.metrics_dict["server_fan_power_watt"],
             "Pwr_CPU_Total": self.metrics_dict["server_cpu_power_watt"],
@@ -118,7 +118,7 @@ class ServerCollector(BaseCollector):
 
             if sensor_name not in self.sensor_gauge_map:
                 continue
-            
+
             self.add_metric(
                 self.sensor_gauge_map[sensor_name],
                 server["ip"],
