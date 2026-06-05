@@ -41,14 +41,14 @@ class PowershelfCollector(BaseCollector):
         self, client: httpx.AsyncClient, semaphore, server, seq
     ):
         async with semaphore:
-            server_name = "psuv_output"
+            server["name"] = "psuv_output"
             if seq > 0:
                 server["name"] = f"psf{seq}" + server["name"]
 
             try:
                 await self.collect_chassis_output_power(client, server)
                 for i in range(1, 13):
-                    await self.collect_psu_health(client, server)
+                    await self.collect_psu_health(client, server, i)
                 await self.collect_chassis_a_health(client, server)
                 await self.collect_chassis_b_health(client, server)
             except Exception as e:
@@ -56,7 +56,7 @@ class PowershelfCollector(BaseCollector):
 
     async def collect_chassis_output_power(self, client, server):
         # pylint: disable=C0301
-        url = f"https://{server['ip']}/redfish/v1/Chassis/chassis/Sensors/Chassis_output_power"
+        url = f"https://{server['ip']}/redfish/v1/Chassis/chassis/Sensors/chassis_output_power"
         data = await HttpClient.get(client, url, self.auth)
         if not data:
             return
@@ -92,7 +92,7 @@ class PowershelfCollector(BaseCollector):
             self.metrics_dict["powershelf_chassis_fail"],
             server["ip"],
             server["location"],
-            "chassis_A",
+            "Chassis_A",
             value,
             [server["name"]],
         )
@@ -105,7 +105,7 @@ class PowershelfCollector(BaseCollector):
             self.metrics_dict["powershelf_chassis_fail"],
             server["ip"],
             server["location"],
-            "chassis_B",
+            "Chassis_B",
             value,
             [server["name"]],
         )
