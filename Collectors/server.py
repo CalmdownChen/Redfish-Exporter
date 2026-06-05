@@ -4,14 +4,15 @@ import httpx
 from prometheus_client.core import GaugeMetricFamily
 
 from tsre.core.logger.log import get_logger
-from src.collecotrs.base import BaseCollector
+from src.collectors.base import BaseCollector
 from src.utils.http_client import HttpClient
 from config.setting import Settings
 
 logger = get_logger("exporter_logger")
 setting = Settings()
 
-Class ServerCollector(BaseCollector):
+
+class ServerCollector(BaseCollector):
     def __init__(self) -> None:
         super().__init__()
         self.server_list = setting.server_list
@@ -60,28 +61,27 @@ Class ServerCollector(BaseCollector):
             ),
         }
 
-        self.sensor_guage_map = {
+        self.sensor_gauge_map = {
             "Temp_CPU0": self.metrics_dict["server_cpu_temperature_celsius"],
             "Temp_CPU1": self.metrics_dict["server_cpu_temperature_celsius"],
-            "Temp_CPU0_DIMMG0": self.metrics_dict
-                ["server_memory_temperature_celsius"
+            "Temp_CPU0_DIMMG0": self.metrics_dict[
+                "server_memory_temperature_celsius"
             ],
-            "Temp_CPU0_DIMMG1": self.metrics_dict
-                ["server_memory_temperature_celsius"
+            "Temp_CPU0_DIMMG1": self.metrics_dict[
+                "server_memory_temperature_celsius"
             ],
-            "Temp_CPU1_DIMMG0": self.metrics_dict
-                ["server_memory_temperature_celsius"
+            "Temp_CPU1_DIMMG0": self.metrics_dict[
+                "server_memory_temperature_celsius"
             ],
-            "Temp_CPU1_DIMMG1": self.metrics_dict
-                ["server_memory_temperature_celsius"
+            "Temp_CPU1_DIMMG1": self.metrics_dict[
+                "server_memory_temperature_celsius"
             ],
             "Temp_GPU_1": self.metrics_dict["server_gpu_temperature_celsius"],
             "Temp_GPU_2": self.metrics_dict["server_gpu_temperature_celsius"],
             "Temp_GPU_3": self.metrics_dict["server_gpu_temperature_celsius"],
             "Temp_GPU_4": self.metrics_dict["server_gpu_temperature_celsius"],
         }
-
-        self_power_guage_map = {
+        self_power_gauge_map = {
             "Pwr_Node_total": self.metrics_dict["server_power_watt"],
             "Pwr_Fan_total": self.metrics_dict["server_fan_power_watt"],
             "Pwr_CPU_total": self.metrics_dict["server_cpu_power_watt"],
@@ -89,7 +89,7 @@ Class ServerCollector(BaseCollector):
             "Pwr_Mem_total": self.metrics_dict["server_mem_power_watt"],
         }
 
-    async def collect_collect(self, client: httpx.AsyncClient, server, _seq):
+    async def collect_metrics(self, client: httpx.AsyncClient, server, _seq):
         try:
             await self.collect_thermal(client, server)
             await self.collect_node_power(client, server)
@@ -100,7 +100,7 @@ Class ServerCollector(BaseCollector):
         except Exception as e:
             logger.error(f"{server['location']}: {e}")
 
-    # def collect_power_statr(self, client, server):
+    # def collect_power_state(self, session, server):
     #     url = f"https://{server['ip']}/redfish/v1/Systems/Self"
     #     data = HttpClient.get(session, url, self.auth)
     #     if not data:
@@ -128,21 +128,21 @@ Class ServerCollector(BaseCollector):
             )
 
     async def collect_node_power(self, client, server):
-        await self.collect_power(client, server, "Pwr_Node_total")
+        await self.collect_power(client, server, "Pwr_Node_Total")
 
     async def collect_fan_power(self, client, server):
-        await self.collect_power(client, server, "Pwr_Fan_total")
+        await self.collect_power(client, server, "Pwr_Fan_Total")
 
     async def collect_cpu_power(self, client, server):
-        await self.collect_power(client, server, "Pwr_CPU_total")
+        await self.collect_power(client, server, "Pwr_CPU_Total")
 
     async def collect_gpu_power(self, client, server):
-        await self.collect_power(client, server, "Pwr_GPU_total")
+        await self.collect_power(client, server, "Pwr_GPU_Total")
 
     async def collect_dimm_power(self, client, server):
-        await self.collect_power(client, server, "Pwr_Mem_total")
+        await self.collect_power(client, server, "Pwr_Mem_Total")
 
-    async def collect_power(self, client, server, power_name):
+    async def collect_power(self, client, server, sensor_name):
         # pylint: disable=C0301
         url = f"https://{server['ip']}/redfish/v1/Chassis/Self/Sensors/{sensor_name}"
         data = await HttpClient.get(client, url, self.auth)
@@ -151,9 +151,9 @@ Class ServerCollector(BaseCollector):
         
         power = data.get("Reading", 0)
         self.add_metric(
-            self.power_guage_map[sensor_name],
+            self.power_gauge_map[sensor_name],
             server["ip"],
             server["location"],
-            power_name,
+            sensor_name,
             power,
         )
