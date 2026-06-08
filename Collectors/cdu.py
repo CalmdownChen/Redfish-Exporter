@@ -119,7 +119,7 @@ class CduCollector(BaseCollector):
             self.process_cdu_fan_fail(
                 server, state["fan_rpm"], state["fan_pwm"]
             )
-            self.process_cdu_calculated_metrics(
+            self.process_cdu_calculated_metric(
                 server,
                 state["T_WI"],
                 state["T_WO"],
@@ -158,28 +158,28 @@ class CduCollector(BaseCollector):
 
     def _is_temperature_metric(self, label):
         return label.startswith("T_") or label == "Ta"
-    
+
     def _is_pump_metric(self, label):
         return (
             label.startswith("RPM_P")
             or label.startswith("POW_P")
             or label.startswith("PWM_P")
         )
-    
+
     def _is_fan_metric(self, label):
         return (
             label.startswith("RPM_F")
             or label.startswith("POW_F")
             or label.startswith("PWM_F")
         )
-    
-    def update_pump_state(self, label, value, state):
+
+    def _update_pump_state(self, label, value, state):
         if label.startswith("RPM_P"):
             state["pump_rpm"][label.replace("RPM_P", "")] = value
         elif label.startswith("PWM_P"):
             state["pump_pwm"][label.replace("PWM_P", "")] = value
 
-    def update_fan_state(self, label, value, state):
+    def _update_fan_state(self, label, value, state):
         if label.startswith("RPM_F"):
             state["fan_rpm"][label.replace("RPM_F", "")] = value
         elif label.startswith("PWM_F"):
@@ -196,10 +196,10 @@ class CduCollector(BaseCollector):
                 value if leak_count >= 2 else 0,
             )
             self.add_metric(
-                self.metrics_dict["cdu_tank_leavel"],
-                server["ip"],
+                self.metrics_dict["cdu_leakage"],
+                "keep-watching-" + server["ip"],
                 server["location"],
-                sensor＿name,
+                sensor_name,
                 value if leak_count == 1 else 0,
             )
 
@@ -277,13 +277,13 @@ class CduCollector(BaseCollector):
             )
 
     # pylint: disable=R0917
-    def process_cdu_calculated_metrics(
+    def process_cdu_calculated_metric(
         self, server, t_wi, t_wo, t_cr, t_cco, t_cci
     ):
-        # Calculate additional metric if all required values are available
+        # Calculate additional metrics if all required values are available
         if (
-            all(v is not None for v in [t_wi, t_wo])
-            and GLOBAＬ_VARS["total_psu_power"]
+            all(v is not None for v in (t_wi, t_wo))
+            and GLOBAL_VARS["total_psu_power"]
         ):
             lpm_w = (
                 (GLOBAL_VARS["total_psu_power"] / 0.97)
@@ -303,13 +303,13 @@ class CduCollector(BaseCollector):
             )
 
         if (
-            all(v is not None for v in [t_cr, t_cco])
+            all(v is not None for v in (t_cr, t_cco))
             and GLOBAL_VARS["total_psu_power"]
         ):
             lpm_c = GLOBAL_VARS["total_psu_power"] / 69.7833 / (t_cr - t_cco)
             lpm_c_rounded = round(lpm_c, 2)
             self.add_metric(
-                self.metrics_dict["cdu  calculated_metric"],
+                self.metrics_dict["cdu_calculated_metric"],
                 server["ip"],
                 server["location"],
                 "LPM_C",
@@ -325,7 +325,7 @@ class CduCollector(BaseCollector):
             heat_cc = lpm_c * (t_cco - t_cci) * 69.7833
             heat_cc_rounded = round(heat_cc, 2)
             self.add_metric(
-                self.metric_dict["cdu_calculated_metric"],
+                self.metrics_dict["cdu_calculated_metric"],
                 server["ip"],
                 server["location"],
                 "Heat_CC",
