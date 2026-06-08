@@ -320,7 +320,7 @@ class CduCollector(BaseCollector):
             )
         else:
             lpm_c = None
-        
+
         if lpm_c is not None and t_cco is not None and t_cci is not None:
             heat_cc = lpm_c * (t_cco - t_cci) * 69.7833
             heat_cc_rounded = round(heat_cc, 2)
