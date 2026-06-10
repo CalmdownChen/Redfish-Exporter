@@ -39,6 +39,11 @@ class ServerCollector(BaseCollector):
                 "Total power reading",
                 labels=labels,
             ),
+            "server_power_status": GaugeMetricFamily(
+                setting.metric_prefix + "server_power_status",
+                "Server power state from Redfish (1: On, 0: not On, -1: API failure)",
+                labels=labels,
+            ),
             "server_fan_power_watt": GaugeMetricFamily(
                 setting.metric_prefix + "server_fan_power_watt",
                 "Total fan power reading",
@@ -57,6 +62,11 @@ class ServerCollector(BaseCollector):
             "server_mem_power_watt": GaugeMetricFamily(
                 setting.metric_prefix + "server_mem_power_watt",
                 "Total memory power reading",
+                labels=labels,
+            ),
+            "server_chassis_location": GaugeMetricFamily(
+                setting.metric_prefix + "server_chassis_location",
+                "Chassis location reading from Redfish",
                 labels=labels,
             ),
         }
@@ -87,6 +97,7 @@ class ServerCollector(BaseCollector):
             "Pwr_CPU_Total": self.metrics_dict["server_cpu_power_watt"],
             "Pwr_GPU_Total": self.metrics_dict["server_gpu_power_watt"],
             "Pwr_Mem_Total": self.metrics_dict["server_mem_power_watt"],
+            "Chassis_Location": self.metrics_dict["server_chassis_location"],
         }
 
     async def collect_metrics(
@@ -94,20 +105,32 @@ class ServerCollector(BaseCollector):
     ):
         async with semaphore:
             try:
+                await self.collect_power_state(client, server)
                 await self.collect_thermal(client, server)
+                await self.collect_node_power(client, server)
                 await self.collect_fan_power(client, server)
                 await self.collect_cpu_power(client, server)
                 await self.collect_gpu_power(client, server)
                 await self.collect_dimm_power(client, server)
+                await self.collect_chassis_location(client, server)
             except Exception as e:
                 logger.error(f"{server['location']}: {e}")
 
-    # def collect_power_state(self, session, server):
-    #     url = f"https://{server['ip']}/redfish/v1/Systems/Self"
-    #     data = HttpClient.get(session, url, self.auth)
-    #     if not data:
-    #         return
-    # logger.info(result)
+    async def collect_power_state(self, client, server):
+        url = f"https://{server['ip']}/redfish/v1/Systems/Self"
+        data = await HttpClient.get(client, url, self.auth)
+        power_status = -1
+        if data:
+            power_state = data.get("PowerState")
+            power_status = 1 if power_state == "On" else 0
+
+        self.add_metric(
+            self.metrics_dict["server_power_status"],
+            server["ip"],
+            server["location"],
+            "PowerState",
+            power_status,
+        )
 
     async def collect_thermal(self, client, server):
         url = f"https://{server['ip']}/redfish/v1/Chassis/Self/Thermal"
@@ -143,6 +166,9 @@ class ServerCollector(BaseCollector):
 
     async def collect_dimm_power(self, client, server):
         await self.collect_power(client, server, "Pwr_Mem_Total")
+
+    async def collect_chassis_location(self, client, server):
+        await self.collect_power(client, server, "Chassis_Location")
 
     async def collect_power(self, client, server, sensor_name):
         # pylint: disable=C0301
