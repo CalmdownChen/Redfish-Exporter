@@ -80,6 +80,7 @@ class CduCollector(BaseCollector):
             except Exception as e:
                 logger.error(e)
             if not data:
+                logger.error(f"no data: {server['ip']}")
                 return
 
             state = {
