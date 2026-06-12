@@ -41,7 +41,7 @@ class ServerCollector(BaseCollector):
             ),
             "server_power_status": GaugeMetricFamily(
                 setting.metric_prefix + "server_power_status",
-                "Server power state from Redfish (1: On, 0: not On, -1: API failure)",
+                "Server power state (1: On, 0: not On, -1: API failure)",
                 labels=labels,
             ),
             "server_fan_power_watt": GaugeMetricFamily(
