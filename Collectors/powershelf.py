@@ -50,8 +50,8 @@ class PowershelfCollector(BaseCollector):
                     await self.collect_psu_health(client, server, i)
                 await self.collect_chassis_a_health(client, server)
                 await self.collect_chassis_b_health(client, server)
-            except Exception as e:
-                logger.error(e)
+            except Exception:
+                pass
 
     async def collect_chassis_output_power(self, client, server):
         # pylint: disable=C0301
