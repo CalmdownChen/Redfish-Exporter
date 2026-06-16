@@ -6,7 +6,6 @@ from prometheus_client.core import GaugeMetricFamily
 from tsre.core.logger.log import get_logger
 from src.collectors.base import BaseCollector
 from src.utils.http_client import HttpClient
-from config.globals import GLOBAL_VARS
 from config.setting import Settings
 
 logger = get_logger("exporter_logger")
@@ -69,7 +68,6 @@ class PowershelfCollector(BaseCollector):
             value,
             [server["name"]],
         )
-        GLOBAL_VARS["total_psu_power"] += value
 
     async def collect_psu_health(self, client, server, seq):
         # pylint: disable=C0301
