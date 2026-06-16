@@ -113,8 +113,8 @@ class ServerCollector(BaseCollector):
                 await self.collect_gpu_power(client, server)
                 await self.collect_dimm_power(client, server)
                 await self.collect_chassis_location(client, server)
-            except Exception as e:
-                logger.error(f"{server['location']}: {e}")
+            except Exception:
+                pass
 
     async def collect_power_state(self, client, server):
         url = f"https://{server['ip']}/redfish/v1/Systems/Self"
