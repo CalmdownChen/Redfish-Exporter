@@ -66,7 +66,7 @@ class CduCollector(BaseCollector):
     ):
         async with semaphore:
             url = f"http://{server['ip']}/getall"
-            data = {}  #type: ignore
+            data = {}  # type: ignore
             try:
                 data = await HttpClient.get(
                     client, url, self.auth
