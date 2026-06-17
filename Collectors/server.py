@@ -7,14 +7,18 @@ from tsre.core.logger.log import get_logger
 from src.collectors.base import BaseCollector
 from src.utils.http_client import HttpClient
 from config.setting import Settings
+import config.globals as Global
 
 logger = get_logger("exporter_logger")
 setting = Settings()
 
 
 class ServerCollector(BaseCollector):
-    def __init__(self) -> None:
+    leakage = False
+
+    def __init__(self, leakage=False) -> None:
         super().__init__()
+        self.leakage = leakage
         self.server_list = setting.server_list
         self.auth = (setting.server_account, setting.server_pwd)
         labels = ["sensor_name", "server_name", "rack_name"]
@@ -69,6 +73,11 @@ class ServerCollector(BaseCollector):
                 "Chassis location reading from Redfish",
                 labels=labels,
             ),
+            "server_leakage": GaugeMetricFamily(
+                setting.metric_prefix + "server_leakage",
+                "Server leakage sensor status (0: normal, 1: leakage)",
+                labels=labels,
+            ),
         }
 
         self.sensor_gauge_map = {
@@ -99,12 +108,21 @@ class ServerCollector(BaseCollector):
             "Pwr_Mem_Total": self.metrics_dict["server_mem_power_watt"],
             "Chassis_Location": self.metrics_dict["server_chassis_location"],
         }
+        self.leakage_sensors = [
+            "Chassis_leakage",
+            "Node_Leakage",
+            "GPU_Node_Leakage",
+        ]
 
     async def collect_metrics(
         self, client: httpx.AsyncClient, semaphore, server, _seq
     ):
         async with semaphore:
             try:
+                if self.leakage:
+                    await self.collect_leakage(client, server)
+                    return
+                self.get_leakage(server)
                 await self.collect_power_state(client, server)
                 await self.collect_thermal(client, server)
                 await self.collect_node_power(client, server)
@@ -131,6 +149,33 @@ class ServerCollector(BaseCollector):
             "PowerState",
             power_status,
         )
+
+    async def collect_leakage(self, client, server):
+        for sensor_name in self.leakage_sensors:
+            try:
+                data = await self.get_sensor(client, server, sensor_name)
+                if not data:
+                    continue
+                value = data.get("Reading", 0)
+                Global.SERVER_LEAKAGE_STATE[server["ip"]][sensor_name] = value
+                if int(value) == 1:
+                    logger.info(
+                        f"[OK] {server['ip']} {sensor_name} leakage = {value}"
+                    )
+            except Exception:
+                pass 
+
+    def get_leakage(self, server):
+        state = Global.SERVER_LEAKAGE_STATE.get(server["ip"], {})
+        for sensor_name in self.leakage_sensors:
+            value = state.get(sensor_name, 0)
+            self.add_metric(
+                self.metrics_dict["server_leakage"],
+                server["ip"],
+                server["location"],
+                sensor_name,
+                value,
+            )
 
     async def collect_thermal(self, client, server):
         url = f"https://{server['ip']}/redfish/v1/Chassis/Self/Thermal"
@@ -170,13 +215,16 @@ class ServerCollector(BaseCollector):
     async def collect_chassis_location(self, client, server):
         await self.collect_power(client, server, "Chassis_Location")
 
-    async def collect_power(self, client, server, sensor_name):
+    async def get_sensor(self, client, server, sensor_name):
         # pylint: disable=C0301
         url = f"https://{server['ip']}/redfish/v1/Chassis/Self/Sensors/{sensor_name}"
         data = await HttpClient.get(client, url, self.auth)
+        return data
+
+    async def collect_power(self, client, server, sensor_name):
+        data = await self.get_sensor(client, server, sensor_name)
         if not data:
             return
-
         power = data.get("Reading", 0)
         self.add_metric(
             self.power_gauge_map[sensor_name],
