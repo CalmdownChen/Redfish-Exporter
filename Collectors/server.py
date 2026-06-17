@@ -109,7 +109,7 @@ class ServerCollector(BaseCollector):
             "Chassis_Location": self.metrics_dict["server_chassis_location"],
         }
         self.leakage_sensors = [
-            "Chassis_leakage",
+            "Chassis_Leakage",
             "Node_Leakage",
             "GPU_Node_Leakage",
         ]
@@ -163,7 +163,7 @@ class ServerCollector(BaseCollector):
                         f"[OK] {server['ip']} {sensor_name} leakage = {value}"
                     )
             except Exception:
-                pass 
+                pass
 
     def get_leakage(self, server):
         state = Global.SERVER_LEAKAGE_STATE.get(server["ip"], {})
