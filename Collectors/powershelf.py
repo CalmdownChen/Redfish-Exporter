@@ -26,12 +26,12 @@ class PowershelfCollector(BaseCollector):
             ),
             "powershelf_psu_fail": GaugeMetricFamily(
                 setting.metric_prefix + "powershelf_psu_fail",
-                "PSU health status (0: OK, 1: Not OK)",
+                "PSU status (0: Health OK and State Enabled, 1: fail)",
                 labels=labels,
             ),
             "powershelf_chassis_fail": GaugeMetricFamily(
                 setting.metric_prefix + "powershelf_chassis_fail",
-                "PSU chassis input health status (0: OK, 1: Not OK)",
+                "PSU chassis input status (0: Health OK and State Enabled, 1: fail)",
                 labels=labels,
             ),
         }
@@ -113,6 +113,8 @@ class PowershelfCollector(BaseCollector):
         if not data:
             value = 1
         else:
-            health = data.get("Status", {}).get("Health")
-            value = 0 if health == "OK" else 1
+            status = data.get("Status", {})
+            health = status.get("Health")
+            state = status.get("State")
+            value = 0 if health == "OK" and state == "Enabled" else 1
         return value

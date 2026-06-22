@@ -184,12 +184,12 @@ psu_power_output = Gauge(
 )
 powershelf_psu_fail = Gauge(
     "powershelf_psu_fail",
-    "PSU health status (0: OK, 1: Not OK)",
+    "PSU status (0: Health OK and State Enabled, 1: fail)",
     ["sensor_name", "rack_name"],
 )
 powershelf_chassis_fail = Gauge(
     "powershelf_chassis_fail",
-    "PSU chassis input health status (0: OK, 1: Not OK)",
+    "PSU chassis input status (0: Health OK and State Enabled, 1: fail)",
     ["sensor_name", "rack_name"],
 )
 cdu_temperature = Gauge(
@@ -575,17 +575,20 @@ def fetch_psu_data():
                     timeout=10,
                 )
                 status_data = status_resp.json()
-                health = status_data.get('Status', {}).get('Health')
-                metric_value = 0 if health == "OK" else 1
+                status = status_data.get('Status', {})
+                health = status.get('Health')
+                state = status.get('State')
+                metric_value = 0 if health == "OK" and state == "Enabled" else 1
                 psu_entry[f"PSU_{i}_Health"] = {"value": health, "unit": None}
+                psu_entry[f"PSU_{i}_State"] = {"value": state, "unit": None}
                 powershelf_psu_fail.labels(
                     sensor_name=f"PSU_{i}",
                     rack_name=rack_name,
                 ).set(metric_value)
-                if health == "OK":
-                    print(f"[OK] {psu['name']} PSU_{i} Health {health}")
+                if metric_value == 0:
+                    print(f"[OK] {psu['name']} PSU_{i} Health {health} State {state}")
                 else:
-                    print(f"[WARN] {psu['name']} PSU_{i} Health {health}")
+                    print(f"[WARN] {psu['name']} PSU_{i} Health {health} State {state}")
                 status_failures[sensor_key] = 0
             except Exception as e:
                 failure_count = status_failures.get(sensor_key, 0) + 1
@@ -617,18 +620,21 @@ def fetch_psu_data():
                     timeout=10,
                 )
                 chassis_data = chassis_resp.json()
-                health = chassis_data.get("Status", {}).get("Health")
-                metric_value = 0 if health == "OK" else 1
+                status = chassis_data.get("Status", {})
+                health = status.get("Health")
+                state = status.get("State")
+                metric_value = 0 if health == "OK" and state == "Enabled" else 1
                 psu_entry[f"{chassis_label}_Health"] = {"value": health, "unit": None}
+                psu_entry[f"{chassis_label}_State"] = {"value": state, "unit": None}
                 powershelf_chassis_fail.labels(
                     sensor_name=chassis_label,
                     rack_name=rack_name,
                 ).set(metric_value)
                 status_failures[sensor_key] = 0
-                if health == "OK":
-                    print(f"[OK] {psu['name']} {chassis_label} Health {health}")
+                if metric_value == 0:
+                    print(f"[OK] {psu['name']} {chassis_label} Health {health} State {state}")
                 else:
-                    print(f"[WARN] {psu['name']} {chassis_label} Health {health}")
+                    print(f"[WARN] {psu['name']} {chassis_label} Health {health} State {state}")
             except Exception as e:
                 failure_count = status_failures.get(sensor_key, 0) + 1
                 status_failures[sensor_key] = failure_count
