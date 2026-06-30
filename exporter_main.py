@@ -184,7 +184,7 @@ psu_power_output = Gauge(
 )
 powershelf_psu_fail = Gauge(
     "powershelf_psu_fail",
-    "PSU status (0: Health OK and State Enabled, 1: fail)",
+    "PSU status (0: Health OK, State Enabled, and Pout non-zero, 1: fail)",
     ["sensor_name", "rack_name"],
 )
 powershelf_chassis_fail = Gauge(
@@ -270,6 +270,16 @@ def _get_session():
         session = requests.Session()
         _thread_local.session = session
     return session
+
+
+def _is_nonzero_value(value):
+    if value is None:
+        return False
+
+    try:
+        return float(value) != 0
+    except (TypeError, ValueError):
+        return False
 
 
 def _get_server_executor():
@@ -578,17 +588,31 @@ def fetch_psu_data():
                 status = status_data.get('Status', {})
                 health = status.get('Health')
                 state = status.get('State')
-                metric_value = 0 if health == "OK" and state == "Enabled" else 1
+                pout_value = status_data.get("Pout", {}).get("Value")
+                metric_value = (
+                    0
+                    if health == "OK"
+                    and state == "Enabled"
+                    and _is_nonzero_value(pout_value)
+                    else 1
+                )
                 psu_entry[f"PSU_{i}_Health"] = {"value": health, "unit": None}
                 psu_entry[f"PSU_{i}_State"] = {"value": state, "unit": None}
+                psu_entry[f"PSU_{i}_Pout"] = {"value": pout_value, "unit": None}
                 powershelf_psu_fail.labels(
                     sensor_name=f"PSU_{i}",
                     rack_name=rack_name,
                 ).set(metric_value)
                 if metric_value == 0:
-                    print(f"[OK] {psu['name']} PSU_{i} Health {health} State {state}")
+                    print(
+                        f"[OK] {psu['name']} PSU_{i} "
+                        f"Health {health} State {state} Pout {pout_value}"
+                    )
                 else:
-                    print(f"[WARN] {psu['name']} PSU_{i} Health {health} State {state}")
+                    print(
+                        f"[WARN] {psu['name']} PSU_{i} "
+                        f"Health {health} State {state} Pout {pout_value}"
+                    )
                 status_failures[sensor_key] = 0
             except Exception as e:
                 failure_count = status_failures.get(sensor_key, 0) + 1

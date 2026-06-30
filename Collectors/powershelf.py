@@ -26,7 +26,7 @@ class PowershelfCollector(BaseCollector):
             ),
             "powershelf_psu_fail": GaugeMetricFamily(
                 setting.metric_prefix + "powershelf_psu_fail",
-                "PSU status (0: Health OK and State Enabled, 1: fail)",
+                "PSU status (0: Health OK, State Enabled, and Pout non-zero, 1: fail)",
                 labels=labels,
             ),
             "powershelf_chassis_fail": GaugeMetricFamily(
@@ -72,7 +72,7 @@ class PowershelfCollector(BaseCollector):
     async def collect_psu_health(self, client, server, seq):
         # pylint: disable=C0301
         url = f"https://{server['ip']}/redfish/v1/Chassis/chassis/Power/Oem/tsmc/PSU{seq}"
-        value = await self._collect_health(client, url)
+        value = await self._collect_health(client, url, require_pout_nonzero=True)
         self.add_metric(
             self.metrics_dict["powershelf_psu_fail"],
             server["ip"],
@@ -108,7 +108,7 @@ class PowershelfCollector(BaseCollector):
             [server["name"]],
         )
 
-    async def _collect_health(self, client, url):
+    async def _collect_health(self, client, url, require_pout_nonzero=False):
         data = await HttpClient.get(client, url, self.auth)
         if not data:
             value = 1
@@ -116,5 +116,19 @@ class PowershelfCollector(BaseCollector):
             status = data.get("Status", {})
             health = status.get("Health")
             state = status.get("State")
-            value = 0 if health == "OK" and state == "Enabled" else 1
+            pout_value = data.get("Pout", {}).get("Value")
+            pout_ok = (
+                self._is_nonzero_value(pout_value) if require_pout_nonzero else True
+            )
+            value = 0 if health == "OK" and state == "Enabled" and pout_ok else 1
         return value
+
+    @staticmethod
+    def _is_nonzero_value(value):
+        if value is None:
+            return False
+
+        try:
+            return float(value) != 0
+        except (TypeError, ValueError):
+            return False
