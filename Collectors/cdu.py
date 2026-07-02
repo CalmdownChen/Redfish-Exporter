@@ -105,7 +105,6 @@ class CduCollector(BaseCollector):
                     self._classify_and_record_metric(
                         label, value, server, state
                     )
-                    # logger.info(f"[OK] {server['location']} {label} = {value}")
 
             self.process_cdu_leakage(server, state["leakage_values"])
             self.process_cdu_tank_level(server, state["tank_level_sensors"])
