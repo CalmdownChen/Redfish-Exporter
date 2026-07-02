@@ -195,22 +195,22 @@ powershelf_chassis_fail = Gauge(
 cdu_temperature = Gauge(
     "cdu_temperature_celsius",
     "Temperature metrics from CDU",
-    ["metric", "rack_name"],
+    ["sensor_name", "rack_name"],
 )
 cdu_pump = Gauge(
     "cdu_pump_metric",
     "Pump metrics from CDU",
-    ["metric", "rack_name"],
+    ["sensor_name", "rack_name"],
 )
 cdu_fan = Gauge(
     "cdu_fan_metric",
     "Fan metrics from CDU",
-    ["metric", "rack_name"],
+    ["sensor_name", "rack_name"],
 )
 cdu_sensor = Gauge(
     "cdu_sensor_metric",
     "Sensor metrics from CDU",
-    ["metric", "rack_name"],
+    ["sensor_name", "rack_name"],
 )
 cdu_tank_level = Gauge(
     "cdu_tank_level",
@@ -732,24 +732,24 @@ def fetch_cdu_data():
                         tank_level_sensors[label] = val
 
                     if label.startswith("T_") or label == "Ta":
-                        cdu_temperature.labels(metric=label, rack_name=rack_name).set(val)
+                        cdu_temperature.labels(sensor_name=label, rack_name=rack_name).set(val)
                         cdu_entry["Temperature"][label] = {"value": val, "unit": "C"}
                     elif label.startswith("RPM_P") or label.startswith("POW_P") or label.startswith("PWM_P"):
-                        cdu_pump.labels(metric=label, rack_name=rack_name).set(val)
+                        cdu_pump.labels(sensor_name=label, rack_name=rack_name).set(val)
                         cdu_entry["Pump"][label] = {"value": val, "unit": None}
                         if label.startswith("RPM_P"):
                             pump_rpm[label.replace("RPM_P", "")] = val
                         elif label.startswith("PWM_P"):
                             pump_pwm[label.replace("PWM_P", "")] = val
                     elif label.startswith("RPM_F") or label.startswith("POW_F") or label.startswith("PWM_F"):
-                        cdu_fan.labels(metric=label, rack_name=rack_name).set(val)
+                        cdu_fan.labels(sensor_name=label, rack_name=rack_name).set(val)
                         cdu_entry["Fan"][label] = {"value": val, "unit": None}
                         if label.startswith("RPM_F"):
                             fan_rpm[label.replace("RPM_F", "")] = val
                         elif label.startswith("PWM_F"):
                             fan_pwm[label.replace("PWM_F", "")] = val
                     else:
-                        cdu_sensor.labels(metric=label, rack_name=rack_name).set(val)
+                        cdu_sensor.labels(sensor_name=label, rack_name=rack_name).set(val)
                         cdu_entry["Sensor"][label] = {"value": val, "unit": None}
 
                     print(f"[OK] {rack_name} {label} = {val}")
